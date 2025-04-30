@@ -196,7 +196,7 @@ These diagrams illustrate the interactions and data movement within the system f
         end
 
         subgraph "Backend Processing"
-            API -- "2. Create Request Record" --> DB[."PostgreSQL DB".]
+            API -- "2. Create Request Record" --> DB["PostgreSQL DB"]
             API -- "3. Enqueue Task" --> Q(["RabbitMQ"])
             Q -- "4. Deliver Task" --> Worker["Worker Process"]
             Worker -- "Update Status" --> DB
@@ -277,7 +277,7 @@ These diagrams illustrate the interactions and data movement within the system f
         Worker-->>-Queue: "Ack Task"
 
         note over API: "API sends update via Subscription"
-        API->>-Client: "Analysis Complete: Req ID, Status, Result"
+        API->>Client: "Analysis Complete: Req ID, Status, Result"
     ```
 
 *   **Sequence: Analysis Request with Agent Retries:**
@@ -293,25 +293,27 @@ These diagrams illustrate the interactions and data movement within the system f
 
         loop "Retry Loop (Max 5)"
             AgentC2->>+DB: "Get AgentTask status/error_count"
-            DB-->>-AgentC2: "Return Status and Count (Retry Count < 5)"
-            AgentC2->>+AgentC3: "execute_tool(...)"
-            AgentC3->>AgentC3: "Attempt action"
-            AgentC3-->>-AgentC2: "Error Occurred"
+            DB->>-AgentC2: "Return Status and Count (Retry Count < 5)"
+            AgentC2->>AgentC3: "execute_tool(...)"
 
-            AgentC2->>+DB: "Update AgentTask (retrying, increment error count)"
-            DB-->>-AgentC2: "OK"
-            note over AgentC2: "Wait / Backoff"
+            alt "Execution Fails"
+                AgentC3->>AgentC3: "Attempt action"
+                AgentC3->>AgentC2: "Error Occurred"
+                AgentC2->>+DB: "Update AgentTask (retrying, increment error count)"
+                DB->>-AgentC2: "OK"
+                note over AgentC2: "Wait / Backoff"
+            else "Execution Succeeds"
+                AgentC3->>AgentC2: "Tool Result (Success)"
+                AgentC2->>+DB: "Update AgentTask (completed)"
+                DB->>-AgentC2: "OK"
+                AgentC2->>Worker: "Task Result"
+            end
         end
 
-        opt "Max Retries Reached"
+        opt "Max Retries Reached (Loop finished without success)"
              AgentC2->>+DB: "Update AgentTask (failed)"
-             DB-->>-AgentC2: "OK"
-             AgentC2-->>-Worker: "Task FAILED"
-        else "Success during retry"
-             AgentC3-->>-AgentC2: "Tool Result (Success)"
-             AgentC2->>+DB: "Update AgentTask (completed)"
-             DB-->>-AgentC2: "OK"
-             AgentC2-->>-Worker: "Task Result"
+             DB->>-AgentC2: "OK"
+             AgentC2->>Worker: "Task FAILED"
         end
     ```
 
@@ -353,45 +355,44 @@ These diagrams illustrate the interactions and data movement within the system f
         participant ShopifyAdminAPI
 
         note over AgentC1: "Analysis proposes action"
-        AgentC1->>+DB: "Create ProposedAction (status='proposed')"
-        DB-->>-AgentC1: "Action ID"
+        AgentC1->>DB: "Create ProposedAction (status='proposed')"
+        DB->>AgentC1: "Action ID"
 
         note over API, Client: "UI gets notification / polls"
-        Client->>+API: "Query Proposed Actions"
-        API->>+DB: "Fetch ProposedActions (user_id, status='proposed')"
-        DB-->>-API: "Action Data List"
-        API-->>-Client: "Display Proposed Actions"
+        Client->>API: "Query Proposed Actions"
+        API->>DB: "Fetch ProposedActions (user_id, status='proposed')"
+        DB->>API: "Action Data List"
+        API->>Client: "Display Proposed Actions"
 
-        Client->>+API: "userApprovesAction(action_id)"
-        API->>+DB: "Fetch Action & User's LinkedAccount Creds"
-        API->>+DB: "Update ProposedAction Status (approved)"
-        DB-->>-API: "Action Details, Decrypted Token"
+        Client->>API: "userApprovesAction(action_id)"
+        API->>DB: "Fetch Action & User's LinkedAccount Creds"
+        API->>DB: "Update ProposedAction Status (approved)"
+        DB->>API: "Action Details, Decrypted Token"
         API->>API: "Validate Permissions (scopes vs action_type)"
-        opt "Permissions OK"
-            API->>+DB: "Update ProposedAction Status (executing)"
-            DB-->>-API: "OK"
-            API->>+ShopifyAdminAPI: "Execute Action (using token)"
-            ShopifyAdminAPI-->>-API: "Result (Success/Failure)"
+        alt "Permissions OK"
+            API->>DB: "Update ProposedAction Status (executing)"
+            DB->>API: "OK"
+            API->>ShopifyAdminAPI: "Execute Action (using token)"
+            ShopifyAdminAPI->>API: "Result (Success/Failure)"
             alt "Execution Success"
-                 API->>+DB: "Update ProposedAction Status (executed)"
-                 DB-->>-API: "OK"
-                 API-->>-Client: "{ success: true, proposedAction: { status: 'executed' } }"
+                 API->>DB: "Update ProposedAction Status (executed)"
+                 DB->>API: "OK"
+                 API->>Client: "{ success: true, proposedAction: { status: 'executed' } }"
             else "Execution Failed"
-                 API->>+DB: "Update ProposedAction Status (failed), store error"
-                 DB-->>-API: "OK"
-                 API-->>-Client: "{ success: false, userErrors: [{ message: 'Shopify execution failed' }], proposedAction: { status: 'failed' } }"
+                 API->>DB: "Update ProposedAction Status (failed), store error"
+                 DB->>API: "OK"
+                 API->>Client: "{ success: false, userErrors: [{ message: 'Shopify execution failed' }], proposedAction: { status: 'failed' } }"
             end
         else "Permissions Insufficient"
-            API->>+DB: "Update ProposedAction Status (failed), store error"
-            DB-->>-API: "OK"
-            API-->>-Client: "{ success: false, userErrors: [{ message: 'Insufficient permissions for this action' }], proposedAction: { status: 'failed' } }"
+            API->>DB: "Update ProposedAction Status (failed), store error"
+            DB->>API: "OK"
+            API->>Client: "{ success: false, userErrors: [{ message: 'Insufficient permissions for this action' }], proposedAction: { status: 'failed' } }"
         end
-
         opt "User Rejects Action"
-            Client->>+API: "userRejectsAction(action_id)"
-            API->>+DB: "Update ProposedAction Status (rejected)"
-            DB-->>-API: "OK"
-            API-->>-Client: "{ success: true, proposedAction: { status: 'rejected' } }"
+            Client->>API: "userRejectsAction(action_id)"
+            API->>DB: "Update ProposedAction Status (rejected)"
+            DB->>API: "OK"
+            API->>Client: "{ success: true, proposedAction: { status: 'rejected' } }"
         end
     ```
 
