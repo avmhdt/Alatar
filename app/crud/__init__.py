@@ -22,7 +22,6 @@ from app.crud.crud_user_preferences import (
     get_user_preferences,
     aget_user_preferences,
     acreate_or_update_user_preferences,
-    get_first_shopify_account_for_user,
 )
 
 # Import other CRUD modules as they are created
@@ -58,7 +57,6 @@ __all__ = [
     "get_user_preferences",
     "aget_user_preferences",
     "acreate_or_update_user_preferences",
-    "get_first_shopify_account_for_user",
     # User Async
     "aget_user",
     "aget_user_by_email",

@@ -6,7 +6,7 @@ from functools import wraps
 from typing import Any, TypedDict
 
 from langchain_core.exceptions import OutputParserException
-from langchain_core.load.serializable import JsonPlusSerializer
+from langchain_core.load.serializable import Serializable as JsonPlusSerializer
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langgraph.checkpoint.base import BaseCheckpointSaver, Checkpoint, CheckpointTuple
 from langgraph.graph import END, StateGraph
