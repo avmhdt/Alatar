@@ -15,7 +15,7 @@ from strawberry.types import Info as StrawberryInfo  # Keep alias for clarity if
 
 from app import schemas
 from app.auth import service as auth_service
-from app.auth.dependencies import get_current_user_id  # Updated import
+from app.auth.dependencies import get_optional_user_id_from_token as get_current_user_id  # Updated import
 from app.models.analysis_request import AnalysisRequest as AnalysisRequestModel  # Added
 from app.models.proposed_action import ProposedAction as ProposedActionModel  # Added
 from app.models.user import User as UserModel  # Avoid name clash
@@ -32,10 +32,10 @@ from app.services import (
 )
 from app.services.queue_client import QUEUE_C1_INPUT, QueueClient  # Added QueueClient
 
-from .errors import map_exception_to_user_errors  # For handling unexpected errors
+from app.graphql.errors import map_exception_to_user_errors  # For handling unexpected errors
 
 # Import types and inputs from types.py
-from .types import (
+from app.graphql.types import (
     AnalysisRequest,  # Added GQL Type
     AnalysisRequestConnection,  # Added Connection Type
     ApproveActionPayload,  # Added Payload
@@ -65,7 +65,6 @@ from .types import (
 
 logger = logging.getLogger(__name__)  # Added logger
 
-
 # Placeholder types (Define actual types in types.py)
 # @strawberry.type # Removed placeholder
 # class AnalysisRequest:
@@ -90,7 +89,7 @@ async def _get_auth_context(info: StrawberryInfo) -> uuid.UUID:
         # This should ideally not happen if context is set up correctly
         raise AuthorizationError(message="Request context not found.")
     try:
-        user_id: uuid.UUID = await get_current_user_id(request=request, db=db)
+        user_id: uuid.UUID = await get_current_user_id(request=request)
         return user_id
     except HTTPException as e:
         if e.status_code == 401:

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from graphql import GraphQLError
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_user_id_from_info, get_required_user_id_from_info, get_current_user_id_context
+from app.auth.dependencies import get_current_user_id_context
 from app.core.exceptions import PermissionDeniedError, ValidationError
 
 # Assuming this exists
@@ -45,7 +45,7 @@ from app.services.analysis_queue_service import (
 # Assume QueueClient is available (e.g., via dependency injection or global instance)
 # Placeholder import - replace with actual access method
 from app.services.queue_client import QueueClient, RABBITMQ_URL
-from app.agents.constants import QUEUE_C1_INPUT # Renamed from INPUT_QUEUE
+from app.agents.constants import INPUT_QUEUE as QUEUE_C1_INPUT # Renamed from INPUT_QUEUE
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ async def submit_analysis_request(
 ) -> SubmitAnalysisRequestPayload:
     """Submits a new analysis request and queues it for processing."""
     db: AsyncSession = info.context.db
-    user_id: uuid.UUID | None = await get_current_user_id_from_info(info)
+    user_id: uuid.UUID | None = await get_current_user_id_context(info.context)
     user_errors: list[UserError] = []
 
     if not user_id:

@@ -1,6 +1,6 @@
 import uuid
 from app.services.queue_client import QueueClient, RABBITMQ_URL
-from app.agents.constants import QUEUE_C1_INPUT
+from app.agents.constants import INPUT_QUEUE as QUEUE_C1_INPUT
 import logging
 
 logger = logging.getLogger(__name__)

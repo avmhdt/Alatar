@@ -19,7 +19,7 @@ from app.agents.tools.shopify_tools import (
 )
 
 # get_shopify_credentials_for_user, # No longer needed here
-from app.agents.utils import get_llm_client, update_agent_task_status  # Added helper
+from app.agents.utils import aget_llm_client, update_agent_task_status  # Added helper
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +216,7 @@ async def _aroute_and_execute_tool(input_data: DataRetrievalInput) -> dict[str, 
 
     # Get LLM client (pass async session - with warning about preference loading)
     try:
-        llm_client = await get_llm_client(db=db_session, user_id=user_id, model_type="tool")
+        llm_client = await aget_llm_client(db=db_session, user_id=user_id, model_type="tool")
         llm_with_tools = llm_client.bind_tools(get_all_shopify_tools())
     except Exception as client_err:
         error_msg = f"[Task: {task_id}] Failed to initialize LLM client: {client_err}"

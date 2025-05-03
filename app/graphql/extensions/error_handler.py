@@ -1,8 +1,8 @@
 import logging
 from typing import Any
 
-from graphql.error import GraphQLError
-from graphql.error import format_error as format_graphql_error
+from graphql.errors import GraphQLError
+from graphql.errors import format_graphql_error
 from strawberry.extensions import Extension
 
 logger = logging.getLogger(__name__)

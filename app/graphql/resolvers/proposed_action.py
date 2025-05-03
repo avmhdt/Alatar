@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from strawberry.types import Info
 
-from app.database import get_db_session
 from app.graphql.types import (
     ProposedAction,
     ProposedActionConnection,
@@ -26,8 +25,8 @@ from app.graphql.utils import (
     decode_cursor,
     encode_cursor,
     get_validated_user_id,
-    get_current_user_id_context,
 )
+from app.auth.dependencies import get_current_user_id_context
 from app.models.proposed_action import (
     ProposedAction as ProposedActionModel,
 )

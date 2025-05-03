@@ -14,7 +14,7 @@ ConnectionCursor = NewType("ConnectionCursor", str)
 # Import Node interface and global ID helpers
 from app.graphql.relay import to_global_id
 
-from .common import AnalysisResult, AnalysisStatus
+from .common import AnalysisResult, AnalysisRequestStatus as AnalysisStatus
 from .proposed_action import ProposedAction
 from .user_error import UserError
 
