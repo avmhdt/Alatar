@@ -109,7 +109,7 @@ logger = logging.getLogger(__name__)
 class Context(BaseContext):
     db: AsyncSession
 
-    async def get_context(self) -> "Context":
+    async def get_context(self) -> AsyncGenerator["Context", None]:
         user_id: uuid.UUID | None = None
         if self.request:
             user_id = get_optional_user_id_from_token(self.request)

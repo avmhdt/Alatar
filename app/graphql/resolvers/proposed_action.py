@@ -26,6 +26,7 @@ from app.graphql.utils import (
     decode_cursor,
     encode_cursor,
     get_validated_user_id,
+    get_current_user_id_context,
 )
 from app.models.proposed_action import (
     ProposedAction as ProposedActionModel,

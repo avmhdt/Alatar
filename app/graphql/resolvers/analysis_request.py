@@ -293,7 +293,7 @@ async def list_analysis_requests(
         # Needs consistent generation based on sorting key(s)
         cursor_val = to_global_id("AnalysisRequestCursor", f"{req.created_at.isoformat()}_{req.id}")
         edges.append(
-            Edge(
+            AnalysisRequestEdge(
                 node=AnalysisRequestGQL.from_orm(req),
                 cursor=cursor_val
             )

@@ -1,3 +1,7 @@
+import uuid
+
+from pydantic import BaseModel
+
 # Pydantic schema for creating an AnalysisRequest
 class AnalysisRequestCreate(BaseModel):
     prompt: str

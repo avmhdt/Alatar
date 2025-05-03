@@ -1,6 +1,6 @@
 import datetime
 import uuid
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, Optional
 
 import strawberry
 
@@ -37,8 +37,8 @@ class ProposedAction(Node):
     linked_account_id: strawberry.ID
     action_type: str
     description: str
-    parameters: dict[str, Any] | None  # Representing JSONB
-    status: ProposedActionStatusGQL  # Use registered GQL enum
+    parameters: Optional[dict[str, Any]]  # Representing JSONB - Corrected Optional type
+    status: ProposedActionStatusEnum  # Use original Enum type
     execution_logs: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime

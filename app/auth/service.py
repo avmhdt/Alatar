@@ -6,7 +6,7 @@ import jwt  # PyJWT
 import requests  # Added for Shopify API calls
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import TEXT, cast, func  # Added func, cast, TEXT
+from sqlalchemy import TEXT, cast, func, select  # Added func, cast, TEXT, select
 from sqlalchemy.orm import Session
 
 # Assuming SessionLocal is available for direct use if needed outside requests
@@ -28,6 +28,7 @@ from app.database import get_db
 # encrypt_data, # No longer needed here for this purpose
 # decrypt_data,
 from app.models.user import User
+from app.models.linked_account import LinkedAccount # Added import
 
 # Removed old SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, pwd_context
 # Removed old verify_password, get_password_hash (using security versions now)

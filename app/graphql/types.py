@@ -165,7 +165,7 @@ class AnalysisRequest:
     id: uuid.UUID
     # user_id: uuid.UUID # Excluded as it's implicit via auth
     prompt: str
-    status: AnalysisRequestStatusEnum
+    status: AnalysisRequestStatus
     result_summary: str | None = None
     result_data: Any | None = (
         None  # Using Any for JSONB, consider more specific type if possible
@@ -188,7 +188,7 @@ class ProposedAction:
     action_type: str
     description: str
     parameters: Any | None = None  # Using Any for JSONB
-    status: ProposedActionStatusEnum
+    status: ProposedActionStatus
     execution_logs: str | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime

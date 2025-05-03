@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession  # Added
 from sqlalchemy.future import select  # Add select import
 
-from app.database import current_user_id_cv, get_async_db
+from app.database import current_user_id_cv, get_async_db, AsyncSessionLocal
 from app.models.linked_account import LinkedAccount
 from app.models.proposed_action import ProposedAction, ProposedActionStatus
 from app.services.permissions import check_scopes, get_required_scopes  # Added

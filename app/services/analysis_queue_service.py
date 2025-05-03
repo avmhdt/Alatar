@@ -1,6 +1,9 @@
 import uuid
-from queue_client import QueueClient
-from log import logger
+from app.services.queue_client import QueueClient, RABBITMQ_URL
+from app.agents.constants import QUEUE_C1_INPUT
+import logging
+
+logger = logging.getLogger(__name__)
 
 class AnalysisQueueService:
     def __init__(self):

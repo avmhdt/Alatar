@@ -1,7 +1,6 @@
 from enum import Enum
 import uuid
 import datetime
-from django.utils.translation import gettext_lazy as _
 
 import strawberry
 from strawberry.types import Node
