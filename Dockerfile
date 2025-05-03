@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.12-slim as builder
+FROM python:3.12 as builder
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -21,7 +21,7 @@ RUN poetry config virtualenvs.create false && \
     poetry install --no-root --only main
 
 # --- Final Stage ---
-FROM python:3.12-slim
+FROM python:3.12
 
 # Create a non-root user and group
 RUN groupadd -r appuser && useradd -r -g appuser appuser
@@ -36,7 +36,7 @@ COPY --from=builder --chown=appuser:appuser /usr/local/bin /usr/local/bin
 # Copy application code
 # Ensure permissions are appropriate for the appuser
 COPY --chown=appuser:appuser ./app /app/app
-COPY --chown=appuser:appuser ./worker.py /app/worker.py # Assuming worker is at root
+COPY --chown=appuser:appuser ./worker.py /app/worker.py
 COPY --chown=appuser:appuser ./migrations /app/migrations
 COPY --chown=appuser:appuser ./alembic.ini /app/alembic.ini
 

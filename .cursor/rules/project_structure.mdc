@@ -1,0 +1,25 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Project Overview
+
+This is a Python project using Poetry for dependencies ([poetry.lock](mdc:poetry.lock), [pyproject.toml](mdc:pyproject.toml)) and Docker for containerization ([Dockerfile](mdc:Dockerfile), [docker-compose.yml](mdc:docker-compose.yml)).
+
+The main application logic seems to reside in the [app/](mdc:app) directory.
+
+The project utilizes several worker processes, defined in files like:
+- [worker.py](mdc:worker.py) (likely the main worker entry point or base class)
+- [worker_data_retrieval.py](mdc:worker_data_retrieval.py)
+- [worker_quantitative_analysis.py](mdc:worker_quantitative_analysis.py)
+- [worker_qualitative_analysis.py](mdc:worker_qualitative_analysis.py)
+- [worker_recommendation_generation.py](mdc:worker_recommendation_generation.py)
+- [worker_action_execution.py](mdc:worker_action_execution.py)
+- [worker_predictive_analysis.py](mdc:worker_predictive_analysis.py)
+- [worker_comparative_analysis.py](mdc:worker_comparative_analysis.py)
+
+Database migrations are likely handled using Alembic ([alembic.ini](mdc:alembic.ini)) and stored in the [migrations/](mdc:migrations) directory.
+
+Testing is done via files in the [tests/](mdc:tests) directory.
+

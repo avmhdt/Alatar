@@ -1,0 +1,22 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Application Structure (app/)
+
+The `app/` directory contains the core application logic, likely built using a framework like FastAPI.
+
+- **Entry Point:** [app/main.py](mdc:app/main.py) initializes the application.
+- **Database:**
+    - Connection and session logic: [app/database.py](mdc:app/database.py)
+    - Database models (ORM): [app/models/](mdc:app/models)
+    - CRUD operations: [app/crud/](mdc:app/crud)
+- **API & Schemas:**
+    - Pydantic schemas: [app/schemas/](mdc:app/schemas) and/or [app/schemas.py](mdc:app/schemas.py)
+    - GraphQL endpoint implementation: [app/graphql/](mdc:app/graphql)
+- **Business Logic:** [app/services/](mdc:app/services)
+- **Authentication/Authorization:** [app/auth/](mdc:app/auth)
+- **Core Configuration/Utilities:** [app/core/](mdc:app/core)
+- **Logging:** Configuration in [app/logging_config.py](mdc:app/logging_config.py)
+- **Agents:** Specialized logic in [app/agents/](mdc:app/agents)

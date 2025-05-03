@@ -1,0 +1,19 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Worker Setup
+
+The project employs a worker-based system for background tasks or distributed processing. The specific roles of the workers seem to be:
+
+- **Base/Common Worker Logic:** Likely found in [worker.py](mdc:worker.py).
+- **Data Retrieval:** Handled by [worker_data_retrieval.py](mdc:worker_data_retrieval.py).
+- **Quantitative Analysis:** Handled by [worker_quantitative_analysis.py](mdc:worker_quantitative_analysis.py).
+- **Qualitative Analysis:** Handled by [worker_qualitative_analysis.py](mdc:worker_qualitative_analysis.py).
+- **Recommendation Generation:** Handled by [worker_recommendation_generation.py](mdc:worker_recommendation_generation.py).
+- **Action Execution:** Handled by [worker_action_execution.py](mdc:worker_action_execution.py).
+- **Predictive Analysis:** Handled by [worker_predictive_analysis.py](mdc:worker_predictive_analysis.py).
+- **Comparative Analysis:** Handled by [worker_comparative_analysis.py](mdc:worker_comparative_analysis.py).
+
+Configuration and orchestration of these workers are likely managed through [docker-compose.yml](mdc:docker-compose.yml) and potentially [docker-compose.prod.yml](mdc:docker-compose.prod.yml).

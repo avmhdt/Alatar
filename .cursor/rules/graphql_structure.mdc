@@ -1,0 +1,16 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# GraphQL API Structure (app/graphql/)
+
+The GraphQL API endpoint is implemented within the [app/graphql/](mdc:app/graphql) directory.
+
+- **Main Schema:** Defined in [app/graphql/schema.py](mdc:app/graphql/schema.py).
+- **Resolvers:** Logic for fetching data resides in [app/graphql/resolvers/](mdc:app/graphql/resolvers) and/or [app/graphql/resolvers.py](mdc:app/graphql/resolvers.py).
+- **Types:** GraphQL object types are defined in [app/graphql/types/](mdc:app/graphql/types) and/or [app/graphql/types.py](mdc:app/graphql/types.py).
+- **Relay Specification:** Support for Relay (connections, pagination) is likely implemented in [app/graphql/relay.py](mdc:app/graphql/relay.py).
+- **Extensions:** Custom extensions might be found in [app/graphql/extensions/](mdc:app/graphql/extensions) or [app/graphql/extensions.py](mdc:app/graphql/extensions.py).
+- **Error Handling:** Specific error logic is in [app/graphql/errors.py](mdc:app/graphql/errors.py).
+- **Utilities:** Helper functions are located in [app/graphql/utils.py](mdc:app/graphql/utils.py).

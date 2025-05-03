@@ -35,6 +35,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - alatar_net
     # command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -70,6 +72,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - alatar_net
     # Command to run the specific worker script
@@ -94,6 +98,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - alatar_net
     command: python worker_data_retrieval.py
@@ -115,6 +121,8 @@ services:
       db:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - alatar_net
@@ -138,6 +146,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - alatar_net
     command: python worker_qualitative_analysis.py
@@ -159,6 +169,8 @@ services:
       db:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - alatar_net
@@ -182,6 +194,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - alatar_net
     command: python worker_comparative_analysis.py
@@ -203,6 +217,8 @@ services:
       db:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - alatar_net
@@ -244,9 +260,24 @@ services:
     networks:
       - alatar_net
 
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - alatar_net
+
 volumes:
   postgres_data:
   rabbitmq_data: # Add volume for RabbitMQ persistence
+  redis_data:
 
 networks:
   alatar_net:
