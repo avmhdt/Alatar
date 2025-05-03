@@ -1,0 +1,9 @@
+# Example benchmark dataset in JSON Lines format for LangSmith evaluation
+# Each line represents one test case.
+# 'input' typically contains the prompt or input data for the agent.
+# 'output' (optional) contains the expected or reference output for evaluation.
+
+{"input": {"prompt": "What were the total sales last month?", "user_id": "user_123"}, "output": "Total sales last month were $15,000."}
+{"input": {"prompt": "Which product had the highest return rate in Q2?", "user_id": "user_456"}, "output": "Product SKU 'XYZ-789' had the highest return rate in Q2."}
+{"input": {"prompt": "Generate a summary of customer feedback received this week.", "user_id": "user_123"}, "output": "Customers mentioned slow shipping times and praised the new product line."}
+{"input": {"prompt": "Identify trends in website traffic over the past 90 days.", "user_id": "user_789"}, "output": null} # Example with no reference output

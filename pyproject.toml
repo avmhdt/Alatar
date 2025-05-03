@@ -1,0 +1,107 @@
+[project]
+name = "alatar"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "avmhdt",email = "josessc.js@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12,<4.0"
+package-mode = false
+
+# Tell Poetry where to find the main package source
+packages = [
+    { include = "app", from = "." },
+]
+
+dependencies = [
+    "passlib[bcrypt] (>=1.7.4,<2.0.0)",
+    "python-dotenv (>=1.1.0,<2.0.0)",
+    "sqlalchemy (>=2.0.40,<3.0.0)",
+    "psycopg2-binary (>=2.9.10,<3.0.0)",
+    "alembic (>=1.15.2,<2.0.0)",
+    "python-multipart (>=0.0.20,<0.0.21)",
+    "requests (>=2.32.3,<3.0.0)",
+    "opentelemetry-api (>=1.32.1,<2.0.0)",
+    "opentelemetry-sdk (>=1.32.1,<2.0.0)",
+    "opentelemetry-instrumentation-fastapi (>=0.53b1,<0.54)",
+    "opentelemetry-exporter-otlp-proto-http (>=1.32.1,<2.0.0)",
+    "fastapi (>=0.115.12,<0.116.0)",
+    "uvicorn[standard] (>=0.34.2,<0.35.0)",
+    "strawberry-graphql[fastapi] (>=0.266.0,<0.267.0)",
+    "pyjwt (>=2.10.1,<3.0.0)",
+    "cryptography (>=44.0.2,<45.0.0)",
+    "starlette (>=0.46.2,<0.47.0)",
+    "aio-pika (>=9.4.1,<10.0.0)",
+    "langchain (>=0.2.5,<1.0.0)",
+    "langgraph (>=0.0.69,<1.0.0)",
+    "langchain-community (>=0.2.5,<1.0.0)",
+    "langsmith (>=0.1.79,<1.0.0)",
+    "slowapi (>=0.1.9,<1.0.0)",
+    "opentelemetry-instrumentation-aio-pika (>=0.53b1,<0.54)",
+    "langchain-openai (>=0.3.15,<0.4.0)",
+    "websockets (>=12.0,<13.0)",
+    "strawberry-graphql-channels (>=0.9.0,<1.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.5"
+pytest-asyncio = "^0.26.0"
+httpx = "^0.28.1"
+ruff = "^0.11.8"
+mypy = "^1.15.0"
+pip-audit = "^2.9.0"
+pre-commit = "^4.2.0"
+testcontainers = "^4.10.0"
+docker = "^7.1.0"
+langsmith = "^0.3.39"
+locust = "^2.36.2"
+bandit = "^1.8.3"
+
+# Ruff configuration
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "W", "C90", "I"]
+ignore = ["E501", "F401", "F403", "F405"] # Example ignores
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "D", "UP", "ANN", "S", "B", "A", "C4", "T10", "ISC", "ICN", "G", "INP", "PIE", "T20", "PYI", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "ARG", "PTH", "PD", "PGH", "PL", "TRY", "FLY", "PERF", "FURB", "LOG", "RUF"]
+ignore = ["ANN101", "ANN102", "ANN401", "S101", "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "TRY003"]
+# Allow unused variables in __init__.py for convenience
+isort = {"known-first-party" = ["app"]}
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = ["S101", "D"] # Ignore assert checks and documentation in tests
+"scripts/*" = ["T201"] # Ignore print statements in scripts
+"app/main.py" = ["D"] # Ignore documentation in main entrypoint for now
+"app/auth/service.py" = ["S324"] # Ignore hashlib if needed for specific auth logic
+
+
+# MyPy configuration
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true # Start with ignoring missing imports for non-stubbed libs
+plugins = ["strawberry.ext.mypy_plugin"]
+
+[[tool.mypy.overrides]]
+module = [
+    "passlib.*",
+    "jose.*",
+    "celery.*",
+    "dotenv.*",
+    "asyncpg.*",
+    "graphql.*",
+    "httpx.*",
+    "redis.*"
+    # Add other libraries without stubs here if needed
+]
+ignore_missing_imports = true

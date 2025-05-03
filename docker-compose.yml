@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      # Add .env for secrets (ensure it's in .gitignore)
+      - ./.env:/.env:ro
+    # env_file:
+    #  - .env # Load variables from .env file
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOGGING_LEVEL: INFO
+      # Required: Set these in your .env file
+      # DATABASE_URL: loaded via env_file
+      # JWT_SECRET: loaded via env_file
+      # APP_SECRET_KEY: loaded via env_file
+      # PGCRYPTO_SYM_KEY: loaded via env_file
+      # SHOPIFY_API_KEY: loaded via env_file
+      # SHOPIFY_API_SECRET: loaded via env_file
+      # SHOPIFY_APP_URL: loaded via env_file
+      # OPENROUTER_API_KEY: loaded via env_file
+      # Optional: LangSmith/OpenTelemetry - loaded via env_file or set here
+      LANGCHAIN_TRACING_V2: "true"
+      # LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY}
+      # LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar}
+      # OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - alatar_net
+    # command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # Use this command for production-like startup without reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  # Worker services (Example for C1, add others similarly)
+  worker_c1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./app:/app/app
+      - ./.env:/.env:ro
+    # env_file:
+    #   - .env
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOGGING_LEVEL: INFO
+      # Pass necessary env vars for DB, RabbitMQ, LLMs, LangSmith etc.
+      # Required: Set these in your .env file
+      # DATABASE_URL: loaded via env_file
+      # PGCRYPTO_SYM_KEY: loaded via env_file
+      # OPENROUTER_API_KEY: loaded via env_file
+      # RABBITMQ_URL: loaded via env_file
+      # Optional: LangSmith/OpenTelemetry
+      LANGCHAIN_TRACING_V2: "true"
+      # LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY}
+      # LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-C1}
+      # OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - alatar_net
+    # Command to run the specific worker script
+    command: python worker.py
+
+  # TODO: Add services for worker_data_retrieval, worker_quantitative_analysis, etc.
+  # worker_data_retrieval:
+  #   build: ...
+  #   volumes: ...
+  #   environment: ... (including LANGCHAIN_TRACING_V2 etc.)
+  #   depends_on: ...
+  #   networks: ...
+  #   command: python worker_data_retrieval.py
+
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    # env_file: # Removed as .env cannot be created easily
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-alatar_db} # Changed default to match app/database.py
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-user} -d $${POSTGRES_DB:-alatar_db}"] # Changed default DB name
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - alatar_net
+
+  rabbitmq: # Uncomment when RabbitMQ is needed (Phase 5)
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672" # AMQP
+      - "15672:15672" # Management UI
+    # env_file: # Removed as .env cannot be created easily
+    #   - .env
+    environment:
+      # Set user/pass if needed, otherwise defaults to guest/guest
+      # RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      # RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+      # For production, set specific user/passwords and vhosts
+      # RABBITMQ_DEFAULT_VHOST: /
+      pass
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq/ # Persist data
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - alatar_net
+
+volumes:
+  postgres_data:
+  rabbitmq_data: # Add volume for RabbitMQ persistence
+
+networks:
+  alatar_net:
+    driver: bridge
