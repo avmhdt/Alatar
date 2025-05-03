@@ -3,8 +3,8 @@ import uuid
 import datetime
 
 import strawberry
-from strawberry.types import Node
-from strawberry.types.node import to_global_id
+# from strawberry.types import Node # Removed old import
+from strawberry.relay import Node, to_global_id # Corrected import for Relay
 
 # Import base UserError if needed for payloads, or define payloads elsewhere
 # from .user_error import UserError
