@@ -1,4 +1,5 @@
-from app.crud.crud_analysis_request import analysis_request
+from app.crud.base import CRUDBase
+from app.crud.analysis_request import analysis_request
 from app.crud.crud_user import (
     create_user,
     get_user,
@@ -42,6 +43,7 @@ from app.crud.crud_proposed_action import (
 
 
 __all__ = [
+    "CRUDBase",
     "analysis_request",
     "create_user",
     "get_user",

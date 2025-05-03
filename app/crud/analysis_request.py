@@ -10,9 +10,9 @@ from sqlalchemy.future import select
 class NotFoundException(Exception):
     pass
 
-from app.crud.base import CRUDBase
 from app.models.analysis_request import AnalysisRequest, AnalysisRequestStatus
 from app.schemas.analysis_request import AnalysisRequestCreate, AnalysisRequestUpdate
+from app.crud.base import CRUDBase
 
 
 class CRUDAnalysisRequest(

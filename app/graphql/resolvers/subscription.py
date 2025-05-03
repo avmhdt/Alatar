@@ -5,7 +5,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import AsyncGenerator
 
-import aioredis
+from redis import asyncio as aioredis
 import strawberry
 from sqlalchemy.orm import Session
 from strawberry.channels import PubSub

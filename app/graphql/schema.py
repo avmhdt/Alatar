@@ -46,9 +46,6 @@ from .extensions.error_handler import CustomErrorHandler  # Updated import path
 
 # Import Node interface and resolver
 from .relay import Node, get_node
-from .resolvers.auth import (
-    complete_shopify_oauth,  # Import the new resolver
-)
 
 # Import subscription resolver
 from .resolvers.subscription import (

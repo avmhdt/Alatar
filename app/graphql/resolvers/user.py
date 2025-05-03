@@ -43,13 +43,13 @@ logger = logging.getLogger(__name__)
 
 
 def get_user_service():  # Placeholder for dependency injection or direct service instantiation
-    from app.services.user_service import UserService  # Avoid top-level import cycle
+    from app.services import UserService  # Avoid top-level import cycle
 
     return UserService()
 
 
 def get_linked_account_service():  # Placeholder
-    from app.services.linked_account_service import LinkedAccountService
+    from app.services import LinkedAccountService
 
     return LinkedAccountService()
 

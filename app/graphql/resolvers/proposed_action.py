@@ -41,9 +41,6 @@ from app.services.action_executor import (
 # Import pagination PageInfo
 from app.graphql.types.analysis_request import PageInfo
 
-# Import the service for execution
-from app.services.action_execution_service import ActionExecutionService
-
 # Import the async service function
 from app.services.action_service import approve_action, reject_action, list_pending_actions
 
