@@ -41,7 +41,7 @@ dependencies = [
     "opentelemetry-instrumentation-aio-pika (>=0.53b1,<0.54)",
     "langchain-openai (>=0.3.15,<0.4.0)",
     "websockets (>=12.0,<13.0)",
-    "strawberry-graphql-channels (>=0.9.0,<1.0.0)"
+    "tenacity (>=9.1.2,<10.0.0)",
 ]
 
 

@@ -21,6 +21,9 @@ from app.models.agent_task import AgentTask
 from app.models.analysis_request import AnalysisRequest, AnalysisRequestStatus
 from app.services.queue_client import RABBITMQ_URL, QueueClient
 
+# Import CRUD functions
+from app import crud
+
 logger = logging.getLogger(__name__)
 
 # --- LLM Client Initialization (Example) ---
@@ -87,9 +90,8 @@ async def _aload_state_from_db(
 ) -> dict | None:
     log_props = {"analysis_request_id": str(analysis_request_id)}
     logger.info("Attempting to load state from DB async", extra={"props": log_props})
-    stmt = select(AnalysisRequest).filter(AnalysisRequest.id == analysis_request_id)
-    result = await db.execute(stmt)
-    request = result.scalars().first()
+    # Use CRUD function
+    request = await crud.analysis_request.aget(db, analysis_request_id)
 
     if request and request.agent_state:
         logger.info("Loaded state from DB async", extra={"props": log_props})
@@ -112,37 +114,18 @@ async def _asave_state_to_db(
     log_props = {"analysis_request_id": str(analysis_request_id)}
     logger.info("Saving state to DB async", extra={"props": log_props})
     try:
-        stmt = select(AnalysisRequest).filter(AnalysisRequest.id == analysis_request_id)
-        result = await db.execute(stmt)
-        request = result.scalars().first()
-
-        if request:
-
-            def default_serializer(obj):
-                if isinstance(obj, uuid.UUID):
-                    return str(obj)
-                if isinstance(obj, AgentDepartment):
-                    return obj.value
-                if isinstance(obj, AgentTaskStatus):
-                    return obj.value
-                raise TypeError(
-                    f"Object of type {obj.__class__.__name__} is not JSON serializable"
-                )
-
-            serializable_state = json.loads(
-                json.dumps(state, default=default_serializer)
-            )
-            request.agent_state = serializable_state
-            db.add(request)  # Add modified object
-            await db.commit()  # Commit async
-            logger.info("Successfully saved state async", extra={"props": log_props})
-        else:
-            logger.error(
-                "Cannot save state: Analysis Request not found.",
-                extra={"props": log_props},
-            )
+        # Use CRUD function
+        await crud.analysis_request.update_agent_state(
+            db, analysis_request_id=analysis_request_id, agent_state=state
+        )
+        logger.info("Successfully saved state async", extra={"props": log_props})
+    except crud.analysis_request.NotFoundException:
+        logger.error(
+            "Cannot save state: Analysis Request not found.",
+            extra={"props": log_props}
+        )
     except Exception:
-        await db.rollback()  # Rollback async
+        await db.rollback() # Rollback async if update_agent_state doesn't handle it
         logger.exception("Failed to save state async", extra={"props": log_props})
 
 
@@ -188,18 +171,15 @@ async def _acreate_agent_task_record(
 ) -> uuid.UUID:
     log_props = _get_log_props(task_info=task_info)
     logger.info("Creating AgentTask record async", extra={"props": log_props})
-    new_task = AgentTask(
+    # Use CRUD function
+    new_task = await crud.create_agent_task(
+        db=db,
         analysis_request_id=task_info["input_payload"]["analysis_request_id"],
         user_id=task_info["input_payload"]["user_id"],
-        status=AgentTaskStatus.PENDING.value,
-        department=task_info["department"].value,
-        input_data=task_info["input_payload"][
-            "task_details"
-        ],  # Store specific details for C2
+        task_type=task_info["department"].value,
+        input_data=task_info["input_payload"]["task_details"],
     )
-    db.add(new_task)
-    await db.commit()  # Commit async to get the ID
-    await db.refresh(new_task)  # Refresh async
+    # CRUD function handles commit/refresh
     log_props["task_id"] = str(new_task.id)
     logger.info("Created AgentTask record async", extra={"props": log_props})
     return new_task.id
@@ -212,9 +192,8 @@ async def _acheck_c2_task_status(
     logger.info(f"Checking status for AgentTask IDs async: {task_ids_str}")
     if not task_ids:
         return {}
-    stmt = select(AgentTask).filter(AgentTask.id.in_(task_ids))
-    result = await db.execute(stmt)
-    tasks = result.scalars().all()
+    # Use CRUD function
+    tasks = await crud.get_agent_tasks_by_ids(db, task_ids)
 
     status_map = {
         task.id: (AgentTaskStatus(task.status), task.output_data, task.logs)
@@ -593,32 +572,25 @@ async def handle_error(state: OrchestratorState, db: AsyncSession) -> dict:
     )
     # Update AnalysisRequest status to FAILED in DB
     try:
-        # Use await and select
-        stmt = select(AnalysisRequest).filter(AnalysisRequest.id == analysis_request_id)
-        result = await db.execute(stmt)
-        request = result.scalars().first()
-
-        if request:
-            # Ensure we use the enum value if the column expects it, or string if it expects string
-            request.status = (
-                AnalysisRequestStatus.FAILED
-            )  # Assuming the model/DB expects the Enum object or its value
-            # request.status = AnalysisRequestStatus.FAILED.value # Use .value if storing strings
-            truncated_error = (
-                (error_message[:1000] + "...")
-                if len(error_message) > 1000
-                else error_message
-            )
-            request.error_message = truncated_error  # Store error in dedicated field
-            # Set completed_at timestamp when failing
-            if request.completed_at is None:
-                request.completed_at = datetime.now(UTC)
-            db.add(request)
-            await db.commit()  # Commit async
-    except Exception as e:
-        await db.rollback()  # Rollback async
+        # Use CRUD function
+        await crud.analysis_request.update_status_and_error(
+            db,
+            analysis_request_id=analysis_request_id,
+            status=AnalysisRequestStatus.FAILED,
+            error_message=error_message,
+            set_completed_at=True,
+        )
+        # CRUD function handles commit
+    except crud.analysis_request.NotFoundException:
+        logger.error(
+            f"[AR: {analysis_request_id}] Analysis Request not found for status update on error.",
+            extra={"props": log_props},
+        )
+    except Exception:
+        # Rollback might not be needed if crud func handles it, but belt-and-suspenders
+        await db.rollback()
         logger.exception(
-            f"[AR: {analysis_request_id}] Failed to update AnalysisRequest status on error async: {e}",
+            f"[AR: {analysis_request_id}] Failed to update AnalysisRequest status on error async",
             extra={"props": log_props},
         )
 
@@ -641,13 +613,14 @@ async def node_wrapper_async(func, db_session_factory):
             # Handle error appropriately, maybe return error state or raise
             return {"error": "User context missing in orchestration state."}
 
-        # Set context var for potential nested RLS needs (e.g., in get_llm_client)
-        from app.database import current_user_id_cv
-
-        cv_token = current_user_id_cv.set(user_id)
+        # REMOVED: Explicit context var handling - handled by get_async_db_session_with_rls
+        # from app.database import current_user_id_cv
+        # cv_token = current_user_id_cv.set(user_id)
         try:
-            # Use async context manager from database.py
-            async with get_async_db() as db:
+            # Use the RLS-enabled async context manager from database.py
+            from app.database import get_async_db_session_with_rls # Ensure import
+
+            async with get_async_db_session_with_rls(user_id) as db:
                 # No need to set RLS here, get_async_db handles it
                 # Pass the async session to the node function
                 result = await func(state, db)
@@ -658,9 +631,10 @@ async def node_wrapper_async(func, db_session_factory):
             # Propagate the error or return an error state
             # Returning error state to be handled by graph's error handling edge
             return {"error": f"Node {func.__name__} failed: {e}"}
-        finally:
-            # Reset context var
-            current_user_id_cv.reset(cv_token)
+        # REMOVED: Explicit context var reset - handled by get_async_db_session_with_rls
+        # finally:
+        #     # Reset context var
+        #     current_user_id_cv.reset(cv_token)
 
     return wrapped
 
@@ -766,13 +740,11 @@ class SqlAlchemyCheckpointAsync(BaseCheckpointSaver):
             f"Checkpoint GET tuple async called for thread_id: {thread_id_str}"
         )
         try:
-            async with self.db_session_factory() as db:  # Use async session
-                # Pass user_id from config for RLS if needed and available
-                # user_id = config["configurable"].get("user_id")
-                # if user_id:
-                #     await db.execute(text("SET LOCAL app.current_user_id = :user_id"), {"user_id": str(user_id)})
-
-                saved = await _aload_state_from_db(db, uuid.UUID(thread_id_str))
+            async with self.db_session_factory() as db: # Use async session
+                # Load state using CRUD
+                saved = await crud.analysis_request.get_agent_state(
+                    db, uuid.UUID(thread_id_str)
+                )
                 if saved:
                     checkpoint_dict = self.serializer.loads(
                         json.dumps(saved["checkpoint"])
@@ -820,12 +792,15 @@ class SqlAlchemyCheckpointAsync(BaseCheckpointSaver):
                 # Include parent_config if needed
                 # "parent_config": checkpoint.parent_config, # Check if parent_config is part of Checkpoint or outer config
             }
-            async with self.db_session_factory() as db:  # Use async session
-                # Pass user_id from config for RLS if needed and available
-                # user_id = config["configurable"].get("user_id")
-                # if user_id:
-                #     await db.execute(text("SET LOCAL app.current_user_id = :user_id"), {"user_id": str(user_id)})
-                await _asave_state_to_db(db, uuid.UUID(thread_id_str), state_to_save)
+            async with self.db_session_factory() as db: # Use async session
+                # Save state using CRUD
+                await crud.analysis_request.update_agent_state(
+                    db, analysis_request_id=uuid.UUID(thread_id_str), agent_state=state_to_save
+                )
+        except crud.analysis_request.NotFoundException:
+             logger.error(
+                f"Checkpoint PUT async failed: Analysis Request {thread_id_str} not found."
+            )
         except Exception as e:
             logger.exception(
                 f"Checkpoint PUT async error for thread_id {thread_id_str}: {e}"

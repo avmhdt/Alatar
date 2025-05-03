@@ -10,7 +10,9 @@ from sqlalchemy import TEXT, cast, func  # Added func, cast, TEXT
 from sqlalchemy.orm import Session
 
 # Assuming SessionLocal is available for direct use if needed outside requests
-from app import schemas
+# Import CRUD module instead of individual functions
+from app import crud
+from app.schemas.user import UserCreate
 
 # Updated imports to use core modules
 from app.core.config import settings
@@ -20,10 +22,8 @@ from app.core.security import (
 from app.core.security import (
     verify_password as security_verify_password,
 )
-from app.database import (
-    get_db,
-)
-from app.models.linked_account import LinkedAccount  # Added model
+from app.database import get_db
+# REMOVED: LinkedAccount model import no longer needed here
 
 # encrypt_data, # No longer needed here for this purpose
 # decrypt_data,
@@ -32,7 +32,9 @@ from app.models.user import User
 # Removed old SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, pwd_context
 # Removed old verify_password, get_password_hash (using security versions now)
 
+import logging
 
+logger = logging.getLogger(__name__)
 # --- JWT Token Handling (using core config/security) ---
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
@@ -71,11 +73,11 @@ def decode_access_token(token: str) -> str | None:  # Return user_id (subject) o
         return None  # Invalid token for other reasons
 
 
-# --- Authentication Service Logic (using core security) ---
+# --- Authentication Service Logic (using CRUD) ---
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User | None:
-    user = get_user_by_email(db, email)  # Use helper
+    user = crud.user.get_user_by_email(db, email=email)  # Use CRUD function from module
     if not user:
         return None
     # Use imported security function
@@ -84,26 +86,29 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
     return user
 
 
-def get_user_by_email(db: Session, email: str) -> User | None:
-    return db.query(User).filter(User.email == email).first()
-
-
-def create_user(db: Session, user_data: schemas.UserCreate) -> User:
+def create_user(db: Session, user_data: UserCreate) -> User:
     # Use imported security function
     hashed_password = security_get_password_hash(user_data.password)
     # Ensure email is stored lowercase for case-insensitive lookup
     db_user = User(email=user_data.email.lower(), hashed_password=hashed_password)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
+    # Call the thin CRUD function to add the user
+    crud.user.add_user(db=db, user_obj=db_user) # No return needed, object is mutated
+    try:
+        db.commit()
+        db.refresh(db_user) # Refresh after commit
+        return db_user
+    except Exception as e:
+        db.rollback()
+        # Log the error
+        logger.error(f"Error creating user: {e}") # TODO: Replace with logger
+        raise
 
 
-# --- FastAPI Dependency for getting current user (using updated JWT decode) ---
+# --- FastAPI Dependency for getting current user (using CRUD) ---
 # Define the scheme once, maybe move to router or main app setup?
 oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/token"
-)  # Adjust tokenUrl if using GraphQL path e.g., "/graphql/token"
+    tokenUrl="/auth/token"
+)  # Updated prefix
 
 
 def get_current_user(
@@ -114,23 +119,22 @@ def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    user_id = decode_access_token(token)
-    if user_id is None:
+    user_id_str = decode_access_token(token)
+    if user_id_str is None:
         raise credentials_exception
     try:
-        # Validate user_id is a UUID? If 'sub' is always UUID string
-        user_uuid = uuid.UUID(user_id)
+        user_uuid = uuid.UUID(user_id_str)
     except ValueError:
         raise credentials_exception  # Subject is not a valid UUID
 
-    user = db.query(User).filter(User.id == user_uuid).first()
+    user = crud.user.get_user(db, user_id=user_uuid)  # Use CRUD function from module
     if user is None:
         # This means the user ID in a valid token doesn't exist in the DB anymore
         raise credentials_exception
     return user
 
 
-# --- Shopify OAuth Logic ---
+# --- Shopify OAuth Logic (using CRUD) ---
 
 
 def generate_shopify_auth_url(shop_domain: str) -> tuple[str, str]:
@@ -205,15 +209,16 @@ def exchange_shopify_code_for_token(shop_domain: str, code: str) -> dict:
         return token_data  # Contains access_token, scope, possibly expires_in, associated_user_scope, associated_user
     except requests.exceptions.RequestException as e:
         # Log the error details
-        print(f"Error exchanging Shopify code: {e}")
+        logger.error(f"Error exchanging Shopify code: {e}") # TODO: Replace with logger
         raise  # Re-raise the exception for the caller to handle
 
 
 def store_shopify_credentials(
     db: Session, user_id: uuid.UUID, shop_domain: str, access_token: str, scopes: str
 ) -> LinkedAccount:
-    """Stores pgcrypto-encrypted Shopify credentials in the LinkedAccounts table.
-    Updates if an account for this user/shop already exists.
+    """Encrypts and stores Shopify credentials using pgcrypto via the CRUD layer.
+
+    Handles creating or updating the account and manages the transaction.
 
     Args:
     ----
@@ -229,39 +234,20 @@ def store_shopify_credentials(
 
     """
     # Encrypt using pgcrypto function within the query
-    # encrypted_token = encrypt_data(access_token) # Removed Fernet encryption
+    # NOTE: This still sends the *key* to the DB with the query, but not the plaintext token.
+    # The encryption happens database-side.
+    encrypted_token_result = db.execute(
+        select(func.pgp_sym_encrypt(access_token, settings.PGCRYPTO_SYM_KEY))
+    ).scalar_one()
 
-    # Check if an account already exists for this user and shop
-    existing_account = (
-        db.query(LinkedAccount)
-        .filter(
-            LinkedAccount.user_id == user_id,
-            LinkedAccount.account_type == "shopify",
-            LinkedAccount.account_name == shop_domain,
-        )
-        .first()
+    # Call the thin CRUD function to save the encrypted data
+    db_account = crud.linked_account.save_shopify_account(
+        db=db,
+        user_id=user_id,
+        shop_domain=shop_domain,
+        encrypted_token=encrypted_token_result,
+        scopes=scopes,
     )
-
-    if existing_account:
-        # Update existing account using pgcrypto function
-        existing_account.encrypted_credentials = func.pgp_sym_encrypt(
-            access_token, settings.PGCRYPTO_SYM_KEY
-        )
-        existing_account.scopes = scopes
-        db_account = existing_account
-    else:
-        # Create new account using pgcrypto function
-        db_account = LinkedAccount(
-            user_id=user_id,
-            account_type="shopify",
-            account_name=shop_domain,
-            # Use func.pgp_sym_encrypt directly here
-            encrypted_credentials=func.pgp_sym_encrypt(
-                access_token, settings.PGCRYPTO_SYM_KEY
-            ),
-            scopes=scopes,
-        )
-        db.add(db_account)
 
     try:
         db.commit()
@@ -270,51 +256,12 @@ def store_shopify_credentials(
     except Exception as e:
         db.rollback()
         # Log the error
-        print(f"Error storing Shopify credentials with pgcrypto: {e}")
+        logger.error(f"Error storing Shopify credentials: {e}") # TODO: Replace with logger
         raise  # Re-raise or handle appropriately
 
 
-def get_decrypted_shopify_credentials(
-    db: Session, user_id: uuid.UUID, shop_domain: str
-) -> str | None:
-    """Retrieves and decrypts Shopify credentials using pgcrypto.
-
-    Args:
-    ----
-        db: SQLAlchemy Session.
-        user_id: UUID of the user.
-        shop_domain: The myshopify.com domain.
-
-    Returns:
-    -------
-        The decrypted access token as a string, or None if not found or decryption fails.
-
-    """
-    try:
-        # Query for the encrypted credentials and decrypt using pgcrypto function
-        decrypted_token = (
-            db.query(
-                # Cast the result of decrypt to TEXT
-                cast(
-                    func.pgp_sym_decrypt(
-                        LinkedAccount.encrypted_credentials, settings.PGCRYPTO_SYM_KEY
-                    ),
-                    TEXT,
-                )
-            )
-            .filter(
-                LinkedAccount.user_id == user_id,
-                LinkedAccount.account_type == "shopify",
-                LinkedAccount.account_name == shop_domain,
-            )
-            .scalar()
-        )
-
-        return decrypted_token  # Returns None if scalar() finds no row or decrypted value is NULL
-
-    except Exception as e:
-        # Log potential errors during decryption (e.g., wrong key, invalid data)
-        print(
-            f"Error decrypting Shopify credentials for user {user_id}, shop {shop_domain}: {e}"
-        )
-        return None
+# REMOVED: Redundant get_decrypted_shopify_credentials function.
+# The CRUD version (crud.linked_account.get_decrypted_token_for_shopify_account)
+# should be used directly where needed.
+# def get_decrypted_shopify_credentials(...):
+#    ...

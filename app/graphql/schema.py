@@ -3,12 +3,14 @@ from collections.abc import AsyncGenerator
 
 import strawberry
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from strawberry.fastapi import BaseContext
 from strawberry.types import Info as StrawberryInfo
 
 from app import schemas
+from app.schemas.user import User as UserSchema, UserCreate as UserCreateSchema
 from app.auth.dependencies import get_optional_user_id_from_token
-from app.database import current_user_id_cv, get_db
+from app.database import current_user_id_cv, get_async_db, get_async_db_session_with_rls
 from app.graphql.resolvers.analysis_request import (
     get_analysis_request,  # Import query
     list_analysis_requests,  # Import query
@@ -97,53 +99,36 @@ from .types.user import (
 # Import the UserError type
 from .types.user_error import UserError  # Updated import
 
+# Import logger if not already present
+import logging
+logger = logging.getLogger(__name__)
+
 
 # --- Custom Context ---
 # Useful for passing request-scoped objects like DB session
 class Context(BaseContext):
-    db: Session
+    db: AsyncSession
 
     async def get_context(self) -> "Context":
-        # Ensure get_db yields a session correctly
-        db_gen = get_db()
         user_id: uuid.UUID | None = None
-        try:
-            # --- RLS Context Setup ---
-            # Attempt to get user_id from token *before* session is used further.
-            # This relies on the `request` being available in BaseContext.
-            if self.request:
-                user_id = get_optional_user_id_from_token(self.request)
-                if user_id:
-                    # Set the context variable. The SQLAlchemy 'after_begin' listener
-                    # in database.py will use this to set app.current_user_id.
-                    token = current_user_id_cv.set(user_id)
-                    # We might need to reset this token later, although get_db also resets
-                    # print(f"GraphQL Context: Set current_user_id_cv to {user_id}") # Optional logging
+        if self.request:
+            user_id = get_optional_user_id_from_token(self.request)
 
-            # --- Get DB Session ---
-            session = next(db_gen)
-            self.db = session
-
-            # --- Yield Context ---
-            # The db session now has the RLS context set (if user_id was found)
-            # via the SQLAlchemy event listener triggered by current_user_id_cv.
-            yield self
-
-        finally:
-            # --- Cleanup ---
-            # Close the session via the generator's finally block
-            next(
-                db_gen, None
-            )  # Consumes the closing part of the context manager from get_db
-
-            # Optional: Reset the context var if it was set here, though get_db should handle it.
-            # if user_id and 'token' in locals():
-            #     current_user_id_cv.reset(token)
-            #     print("GraphQL Context: Reset current_user_id_cv") # Optional logging
+        if user_id:
+            # Use the new context manager that handles session and RLS
+            async with get_async_db_session_with_rls(user_id) as session:
+                self.db = session
+                yield self
+        else:
+            # No user ID, provide a regular session without RLS
+            # This might be needed for public queries/mutations
+            async with get_async_db() as session: # Use simplified get_async_db
+                self.db = session
+                yield self
 
 
 # --- Object Types (Example: Define directly or import from types) ---
-@strawberry.experimental.pydantic.type(model=schemas.User, all_fields=True)
+@strawberry.experimental.pydantic.type(model=UserSchema, all_fields=True)
 class UserGQLTypeFromPydantic:  # Renamed to avoid conflict with imported User type
     pass
 
@@ -151,7 +136,7 @@ class UserGQLTypeFromPydantic:  # Renamed to avoid conflict with imported User t
 @strawberry.type
 class AuthPayload:
     token: str
-    user: User | None = None  # Use the GQL User type
+    user: User | None = None  # Use the GQL User type (defined in types/user.py)
     userErrors: list[UserError] = strawberry.field(default_factory=list)
 
 
@@ -169,7 +154,7 @@ class ShopifyOAuthStartPayload:
 
 
 # --- Input Types ---
-@strawberry.experimental.pydantic.input(model=schemas.UserCreate)
+@strawberry.experimental.pydantic.input(model=UserCreateSchema)
 class UserRegisterInput:
     pass
 
@@ -290,12 +275,13 @@ class Mutation:
         return await update_user_preferences(info=info, input=input)
 
     # Add complete_shopify_oauth mutation
-    @strawberry.mutation
-    async def complete_shopify_oauth(
-        self, info: StrawberryInfo, input: CompleteShopifyOAuthInput
-    ) -> CompleteShopifyOAuthPayload:
-        """Completes the Shopify OAuth flow by exchanging the code for a token and linking the account."""
-        return await complete_shopify_oauth(info=info, input=input)
+    # REMOVED: Rely on REST endpoint /auth/shopify/callback for standard web flow
+    # @strawberry.mutation
+    # async def complete_shopify_oauth(
+    #     self, info: StrawberryInfo, input: CompleteShopifyOAuthInput
+    # ) -> CompleteShopifyOAuthPayload:
+    #     """Completes the Shopify OAuth flow by exchanging the code for a token and linking the account."""
+    #     return await complete_shopify_oauth(info=info, input=input)
 
     # Add register, login later if needed
 
@@ -336,7 +322,7 @@ schema = strawberry.Schema(
         AuthPayload,
         RegisterPayload,
         ShopifyOAuthStartPayload,
-        CompleteShopifyOAuthPayload,  # Add new payload
+        # REMOVED CompleteShopifyOAuthPayload, # Add new payload
         # Preferences types
         UserPreferences,
         UserPreferencesPayload,

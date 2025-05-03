@@ -63,7 +63,7 @@ services:
       # Optional: LangSmith/OpenTelemetry
       LANGCHAIN_TRACING_V2: "true"
       # LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY}
-      # LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-C1}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-C1}
       # OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
     depends_on:
       db:
@@ -75,14 +75,138 @@ services:
     # Command to run the specific worker script
     command: python worker.py
 
-  # TODO: Add services for worker_data_retrieval, worker_quantitative_analysis, etc.
-  # worker_data_retrieval:
-  #   build: ...
-  #   volumes: ...
-  #   environment: ... (including LANGCHAIN_TRACING_V2 etc.)
-  #   depends_on: ...
-  #   networks: ...
-  #   command: python worker_data_retrieval.py
+  # --- C2 Department Workers ---\
+  worker_data_retrieval:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./app:/app/app
+      - ./.env:/.env:ro
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOGGING_LEVEL: INFO
+      LANGCHAIN_TRACING_V2: "true"
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-DataRetrieval}
+      # Inherit other necessary env vars from .env (DB_URL, RABBITMQ_URL, etc.)
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - alatar_net
+    command: python worker_data_retrieval.py
+
+  worker_quantitative_analysis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./app:/app/app
+      - ./.env:/.env:ro
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOGGING_LEVEL: INFO
+      LANGCHAIN_TRACING_V2: "true"
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-QuantitativeAnalysis}
+      # Inherit other necessary env vars from .env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - alatar_net
+    command: python worker_quantitative_analysis.py
+
+  worker_qualitative_analysis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./app:/app/app
+      - ./.env:/.env:ro
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOGGING_LEVEL: INFO
+      LANGCHAIN_TRACING_V2: "true"
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-QualitativeAnalysis}
+      # Inherit other necessary env vars from .env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - alatar_net
+    command: python worker_qualitative_analysis.py
+
+  worker_recommendation_generation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./app:/app/app
+      - ./.env:/.env:ro
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOGGING_LEVEL: INFO
+      LANGCHAIN_TRACING_V2: "true"
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-RecommendationGeneration}
+      # Inherit other necessary env vars from .env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - alatar_net
+    command: python worker_recommendation_generation.py
+
+  worker_comparative_analysis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./app:/app/app
+      - ./.env:/.env:ro
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOGGING_LEVEL: INFO
+      LANGCHAIN_TRACING_V2: "true"
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-ComparativeAnalysis}
+      # Inherit other necessary env vars from .env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - alatar_net
+    command: python worker_comparative_analysis.py
+
+  worker_predictive_analysis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./app:/app/app
+      - ./.env:/.env:ro
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOGGING_LEVEL: INFO
+      LANGCHAIN_TRACING_V2: "true"
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-PredictiveAnalysis}
+      # Inherit other necessary env vars from .env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - alatar_net
+    command: python worker_predictive_analysis.py
 
   db:
     image: postgres:16-alpine
@@ -110,13 +234,6 @@ services:
       - "15672:15672" # Management UI
     # env_file: # Removed as .env cannot be created easily
     #   - .env
-    environment:
-      # Set user/pass if needed, otherwise defaults to guest/guest
-      # RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
-      # RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
-      # For production, set specific user/passwords and vhosts
-      # RABBITMQ_DEFAULT_VHOST: /
-      pass
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq/ # Persist data
     healthcheck:

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession  # Added
 from sqlalchemy.future import select  # Add select import
 
-from app.database import AsyncSessionLocal  # Changed from SessionLocal
+from app.database import current_user_id_cv, get_async_db
 from app.models.linked_account import LinkedAccount
 from app.models.proposed_action import ProposedAction, ProposedActionStatus
 from app.services.permissions import check_scopes, get_required_scopes  # Added
@@ -37,6 +37,266 @@ async def execute_approved_action(action_id: uuid.UUID):
         # NOTE: db.close() should become await db.close() after refactoring
         await db.close()
 
+
+# TODO: Refactor this function to be fully async (use await db.execute(select(...)), await db.commit(), etc.)
+async def execute_action_async(action_id: uuid.UUID, user_id: uuid.UUID): # Accept IDs
+    """Handles the execution of an approved action asynchronously.
+    Fetches action, checks permissions, executes via Shopify client, updates status.
+    Acquires its own DB session and manages RLS context.
+    Should be called by the action execution worker.
+    """
+    log_props = {"action_id": str(action_id), "user_id": str(user_id)}
+    cv_token = current_user_id_cv.set(user_id) # Set RLS context for this task
+    action: ProposedAction | None = None
+    shopify_client: ShopifyAdminAPIClient | None = None
+    db: AsyncSession | None = None # Define db in outer scope
+
+    try:
+        # Acquire session using async context manager
+        async with get_async_db() as db:
+            # get_async_db sets RLS using current_user_id_cv
+
+            # Fetch the action using AsyncSession
+            action_stmt = select(ProposedAction).filter(ProposedAction.id == action_id)
+            result = await db.execute(action_stmt)
+            action = result.scalar_one_or_none()
+
+            if not action:
+                logger.error(
+                    f"Action execution failed: Non-existent action ID: {action_id}",
+                    extra=log_props,
+                )
+                return # Action doesn't exist, nothing more to do
+
+            # Ensure the action is in the correct state to be executed
+            if action.status != ProposedActionStatus.APPROVED:
+                logger.warning(
+                    f"Attempted to execute action {action_id} which is not in APPROVED state (state: {action.status}). Skipping.",
+                    extra={
+                        "audit": True,
+                        "audit_event": "ACTION_EXECUTION_SKIPPED",
+                        "reason": f"Invalid state: {action.status.value}",
+                        **log_props,
+                        "action_type": action.action_type,
+                    },
+                )
+                # Do not change status here, let the approval step handle the state machine logic
+                return
+
+            # Audit Log: Execution Started
+            logger.info(
+                f"Starting execution for action {action.id} (Type: {action.action_type})",
+                extra={
+                    "audit": True,
+                    "audit_event": "ACTION_EXECUTION_STARTED",
+                    **log_props,
+                    "action_type": action.action_type,
+                    "parameters": action.parameters,
+                },
+            )
+            action.status = ProposedActionStatus.EXECUTING
+            action.execution_logs = "Starting execution..."
+            db.add(action)
+            await db.commit() # Commit EXECUTING status
+            await db.refresh(action)
+
+            execution_outcome = "UNKNOWN"
+            error_details = None
+            try:
+                # 1. Fetch Linked Account credentials and info (Async)
+                linked_account_stmt = select(LinkedAccount).filter(
+                    LinkedAccount.id == action.linked_account_id
+                )
+                result = await db.execute(linked_account_stmt)
+                linked_account = result.scalar_one_or_none()
+
+                if not linked_account:
+                    raise ValueError(
+                        f"ProposedAction {action.id} is missing required linked_account {action.linked_account_id}."
+                    )
+
+                if linked_account.account_type != "shopify":
+                    raise NotImplementedError(
+                        f"Action execution only implemented for 'shopify', not '{linked_account.account_type}'"
+                    )
+
+                granted_scopes_str = linked_account.scopes or ""
+                granted_scopes = [
+                    scope.strip() for scope in granted_scopes_str.split(",") if scope.strip()
+                ]
+                shop_domain = linked_account.account_name
+
+                # 2. Check Permissions
+                required_scopes = get_required_scopes(action.action_type)
+                if not required_scopes:
+                    logger.warning(
+                        f"No scopes defined for action type '{action.action_type}'. Assuming permitted, but configuration needed.",
+                        extra=log_props
+                    )
+
+                if not check_scopes(required_scopes, granted_scopes):
+                    permission_error_msg = (
+                        f"Permission denied. Action '{action.action_type}' requires scopes: "
+                        f"{required_scopes}, but user only granted: {granted_scopes}."
+                    )
+                    raise PermissionError(permission_error_msg)
+
+                # 3. Initialize Shopify Client (Async)
+                # Pass the async db session
+                shopify_client = ShopifyAdminAPIClient(
+                    db=db, user_id=action.user_id, shop_domain=shop_domain
+                )
+                # Initialization (_ensure_initialized) happens lazily within client methods
+
+                # 4. Execute Action based on type (Async)
+                execution_result = None
+                if action.action_type == "shopify_update_product_price":
+                    product_id = action.parameters.get("product_id")
+                    new_price = action.parameters.get("new_price")
+                    if not product_id or new_price is None:
+                        raise ValueError(
+                            "Missing 'product_id' (variant GID) or 'new_price' in parameters for shopify_update_product_price"
+                        )
+
+                    logger.info(
+                        f"Executing shopify_update_product_price async: Variant GID {product_id}, New Price {new_price}",
+                        extra=log_props
+                    )
+                    # Call async client method, passing db session
+                    execution_result = await shopify_client.aupdate_product_price(
+                        product_variant_gid=product_id, new_price=float(new_price), db=db
+                    )
+
+                elif action.action_type == "shopify_create_discount_code":
+                    discount_details = action.parameters.get("discount_details")
+                    if not discount_details or not isinstance(discount_details, dict):
+                        raise ValueError(
+                            "Missing or invalid 'discount_details' (dict) in parameters for shopify_create_discount_code"
+                        )
+
+                    logger.info(
+                        f"Executing shopify_create_discount_code async with details: {discount_details}",
+                        extra=log_props
+                    )
+                    execution_result = await shopify_client.acreate_discount(
+                        discount_details=discount_details, db=db
+                    )
+
+                elif action.action_type == "shopify_adjust_inventory":
+                    inventory_item_gid = action.parameters.get("inventory_item_gid")
+                    location_gid = action.parameters.get("location_gid")
+                    delta = action.parameters.get("delta")
+                    if not inventory_item_gid or not location_gid or delta is None:
+                        raise ValueError(
+                            "Missing 'inventory_item_gid', 'location_gid', or 'delta' in parameters for shopify_adjust_inventory"
+                        )
+
+                    logger.info(
+                        f"Executing shopify_adjust_inventory async: Item {inventory_item_gid}, Location {location_gid}, Delta {delta}",
+                        extra=log_props
+                    )
+                    execution_result = await shopify_client.aadjust_inventory(
+                        inventory_item_gid=inventory_item_gid,
+                        location_gid=location_gid,
+                        delta=int(delta),
+                        db=db,
+                    )
+
+                else:
+                    raise NotImplementedError(
+                        f"Execution logic for action type '{action.action_type}' is not defined."
+                    )
+
+                # 5. Update Action Status to Executed (Async)
+                action.status = ProposedActionStatus.EXECUTED
+                action.executed_at = datetime.now(UTC)
+                exec_log_str = f"Execution successful. Result summary: {str(execution_result)[:500]}"
+                action.execution_logs = exec_log_str
+                execution_outcome = "SUCCESS"
+                logger.info(f"Action {action.id} executed successfully async.", extra=log_props)
+
+            # --- Exception Handling within the 'try' for action execution ---
+            except PermissionError as pe:
+                action.status = ProposedActionStatus.FAILED
+                error_details = f"Permission denied: {pe}"
+                action.execution_logs = error_details
+                execution_outcome = "FAILED_PERMISSION"
+                logger.error(f"Permission error executing action {action.id} async: {pe}", extra=log_props)
+            except NotImplementedError as nie:
+                action.status = ProposedActionStatus.FAILED
+                error_details = f"Action type not implemented: {nie}"
+                action.execution_logs = error_details
+                execution_outcome = "FAILED_NOT_IMPLEMENTED"
+                logger.error(f"Action type not implemented for action {action.id} async: {nie}", extra=log_props)
+            except ShopifyAdminAPIClientError as se:
+                action.status = ProposedActionStatus.FAILED
+                error_details = f"Shopify API error: {se} (Status: {se.status_code}, Errors: {se.shopify_errors})"
+                action.execution_logs = error_details
+                execution_outcome = "FAILED_API_ERROR"
+                logger.error(
+                    f"Shopify API error executing action {action.id} async: {se}", exc_info=True, extra=log_props
+                )
+            except ValueError as ve: # Catch parameter validation errors
+                action.status = ProposedActionStatus.FAILED
+                error_details = f"Invalid parameters: {ve}"
+                action.execution_logs = error_details
+                execution_outcome = "FAILED_INVALID_PARAMS"
+                logger.error(f"Invalid parameters for action {action.id} async: {ve}", exc_info=True, extra=log_props)
+            except Exception as e:
+                action.status = ProposedActionStatus.FAILED
+                error_details = f"Unexpected error: {e}"
+                action.execution_logs = error_details
+                execution_outcome = "FAILED_UNEXPECTED"
+                logger.exception(f"Unexpected error executing action {action.id} async: {e}", extra=log_props)
+
+            # --- Final Status Update & Audit Log (within async session) ---
+            finally:
+                # Log finished event regardless of outcome
+                logger.info(
+                    f"Action execution finished async with outcome: {execution_outcome}",
+                    extra={
+                        "audit": True,
+                        "audit_event": "ACTION_EXECUTION_FINISHED",
+                        **log_props,
+                        "action_type": action.action_type,
+                        "final_status": action.status.value,
+                        "outcome": execution_outcome,
+                        "error_details": error_details,
+                    },
+                )
+                # Commit the final status (EXECUTED or FAILED)
+                db.add(action)
+                await db.commit()
+
+    # --- Outer Exception Handling (for session acquisition or other unexpected errors) ---
+    except Exception as outer_err:
+        logger.exception(f"Critical error in execute_action_async for action {action_id}: {outer_err}", extra=log_props)
+        # If action was loaded, try to mark as FAILED with this critical error message
+        # This requires another DB session attempt if the first one failed critically
+        if action and action.status not in [ProposedActionStatus.EXECUTED, ProposedActionStatus.FAILED]:
+             try:
+                 async with get_async_db() as db_fail_safe:
+                    # Re-fetch in new session to avoid detached instance errors
+                    fail_action_stmt = select(ProposedAction).filter(ProposedAction.id == action_id)
+                    result = await db_fail_safe.execute(fail_action_stmt)
+                    fail_action = result.scalar_one_or_none()
+                    if fail_action and fail_action.status not in [ProposedActionStatus.EXECUTED, ProposedActionStatus.FAILED]:
+                        fail_action.status = ProposedActionStatus.FAILED
+                        fail_action.execution_logs = f"Critical executor failure: {outer_err}"
+                        db_fail_safe.add(fail_action)
+                        await db_fail_safe.commit()
+             except Exception as fail_safe_err:
+                  logger.error(f"Failed to perform fail-safe status update for action {action_id}: {fail_safe_err}", extra=log_props)
+
+    # --- Resource Cleanup ---
+    finally:
+        # Close Shopify client if it was initialized
+        if shopify_client:
+            await shopify_client.aclose()
+            logger.debug(f"Closed Shopify client for action {action_id}", extra=log_props)
+        # Reset RLS context variable
+        current_user_id_cv.reset(cv_token)
+        logger.debug(f"Reset RLS context for action {action_id}", extra=log_props)
 
 # TODO: Refactor this function to be fully async (use await db.execute(select(...)), await db.commit(), etc.)
 async def _execute_action_logic(db: AsyncSession, action_id: uuid.UUID):  # Made async

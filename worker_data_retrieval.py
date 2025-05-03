@@ -20,11 +20,14 @@ from app.agents.departments.data_retrieval import (
     data_retrieval_runnable,
 )
 
-# Agent utility for status updates
-from app.agents.utils import update_agent_task_status
+# Removed Agent utility for status updates - Use CRUD now
+# from app.agents.utils import update_agent_task_status
+# Import CRUD functions directly
+from app import crud
+from app.agents.utils import update_agent_task_status # Import from utils instead
 
-# Database session factory
-from app.database import AsyncSessionLocal, current_user_id_cv
+# Database session factory and RLS utility
+from app.database import AsyncSessionLocal, current_user_id_cv, get_async_db_session_with_rls
 
 # Queue Client
 from app.services.queue_client import RABBITMQ_URL, QueueClient
@@ -37,68 +40,16 @@ logger = logging.getLogger("worker_data_retrieval")
 
 
 # --- RLS Context Setting Function (copied/adapted from worker.py) ---
-# Removed - Now handled by get_db_session_with_context
+# REMOVED - Now handled by get_async_db_session_with_rls utility
 # async def set_db_session_context(session: Session, user_id: uuid.UUID):
 #    ...
 
 
 # --- Database Context Management (Async with RLS) ---
-@asynccontextmanager
-async def get_db_session_with_context(
-    user_id: uuid.UUID,
-) -> AsyncGenerator[AsyncSession, None]:
-    """Provides an async DB session context manager with RLS context set."""
-    db: AsyncSession = AsyncSessionLocal()
-    rls_set_success = False
-    if user_id:
-        try:
-            await db.execute(
-                text("SET LOCAL app.current_user_id = :user_id"),
-                {"user_id": str(user_id)},
-            )
-            rls_set_success = True
-        except Exception as e:
-            logger.error(
-                f"Failed to set RLS context for user {user_id} in DR worker: {e}",
-                exc_info=True,
-                extra={"props": {"user_id": str(user_id)}},
-            )
-            await db.rollback()
-            await db.close()
-            current_user_id_cv.set(None)
-            raise
-
-    if rls_set_success or not user_id:
-        try:
-            yield db
-            await db.commit()
-        except SQLAlchemyError as e:  # Catch specific DB errors
-            logger.error(
-                f"Database error during session for user {user_id} in DR worker: {e}",
-                exc_info=True,
-                extra={"props": {"user_id": str(user_id)}},
-            )
-            await db.rollback()  # Rollback asynchronously
-            raise
-        except Exception as e:  # Catch other errors
-            logger.error(
-                f"Unexpected error during session for user {user_id} in DR worker: {e}",
-                exc_info=True,
-                extra={"props": {"user_id": str(user_id)}},
-            )
-            await db.rollback()  # Rollback asynchronously
-            raise
-        finally:
-            if rls_set_success:
-                try:
-                    await db.execute(text("RESET app.current_user_id;"))
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to reset RLS context for user {user_id} in DR worker: {e}",
-                        extra={"props": {"user_id": str(user_id)}},
-                    )
-            await db.close()  # Close asynchronously
-            current_user_id_cv.set(None)
+# REMOVED Local get_db_session_with_context - Use shared utility from app.database now
+# @asynccontextmanager
+# async def get_db_session_with_context(...):
+#    ...
 
 
 # --- Message Processing Logic ---
@@ -144,7 +95,8 @@ async def process_data_retrieval_message(message: AbstractIncomingMessage) -> bo
             task_id = uuid.UUID(task_id_str)
             user_id = uuid.UUID(user_id_str)
             analysis_request_id = uuid.UUID(analysis_request_id_str)
-            current_user_id_cv.set(user_id)  # Set context var
+            # REMOVED Context var handling, now done by context manager
+            # current_user_id_cv.set(user_id)  # Set context var
             log_props["task_id"] = str(task_id)
             log_props["user_id"] = str(user_id)
             log_props["analysis_request_id"] = str(analysis_request_id)
@@ -153,7 +105,8 @@ async def process_data_retrieval_message(message: AbstractIncomingMessage) -> bo
                 "Invalid UUID format in DR message",
                 extra={"props": {**log_props, "raw_data": data}},
             )
-            current_user_id_cv.set(None)
+            # REMOVED Context var handling, now done by context manager
+            # current_user_id_cv.set(None)
             return False
 
         logger.info("Processing DR Task", extra={"props": log_props})
@@ -162,12 +115,34 @@ async def process_data_retrieval_message(message: AbstractIncomingMessage) -> bo
         runnable_error_message = "Task processing failed unexpectedly."
 
         # Use the async context manager with user_id
-        async with get_db_session_with_context(user_id) as db:
+        # Use the shared RLS context manager
+        async with get_async_db_session_with_rls(user_id) as db:
             try:
-                # Update task status to RUNNING (use await)
+                # --- Idempotency Check --- #
+                agent_task = await crud.agent_task.aget(db=db, id=task_id)
+                if not agent_task:
+                    logger.error(
+                        f"AgentTask {task_id} not found in database.",
+                        extra={"props": log_props}
+                    )
+                    return False # NACK, task record doesn't exist
+
+                if agent_task.status in [AgentTaskStatus.COMPLETED, AgentTaskStatus.FAILED]:
+                    logger.warning(
+                        f"Task {task_id} already in terminal state {agent_task.status}. Skipping duplicate processing.",
+                        extra={"props": log_props}
+                    )
+                    return True # ACK message, processing already done
+
+                # --- End Idempotency Check --- #
+
+                # Update task status to RUNNING (use CRUD function)
                 try:
                     # Pass AsyncSession to update function
-                    await update_agent_task_status(db, task_id, AgentTaskStatus.RUNNING)
+                    # Use the utility function now
+                    await update_agent_task_status( # Use util function
+                        db, task_id, AgentTaskStatus.RUNNING
+                    )
                     logger.info(
                         "Updated DR Task status to RUNNING.", extra={"props": log_props}
                     )
@@ -224,15 +199,17 @@ async def process_data_retrieval_message(message: AbstractIncomingMessage) -> bo
                     exc_info=True,
                     extra={"props": log_props},
                 )
+                # Attempt to mark as FAILED if not already handled by inner logic (use CRUD)
                 try:
-                    # Attempt to mark as FAILED if not already handled by inner logic (use await)
-                    await update_agent_task_status(
+                    # Use the utility function now
+                    await update_agent_task_status( # Use util function
                         db,
                         task_id,
                         AgentTaskStatus.FAILED,
-                        error_message=runnable_error_message,
+                        logs=runnable_error_message, # Pass error message to logs field
                     )
                 except Exception:
+                    # pass # REMOVED pass
                     logger.error(
                         "Failed to update task status to FAILED after worker callback error",
                         exc_info=True,
@@ -269,8 +246,10 @@ async def process_data_retrieval_message(message: AbstractIncomingMessage) -> bo
         return False
     finally:
         # Ensure context var is reset
-        if "current_user_id_cv" in locals() and current_user_id_cv.get() is not None:
-            current_user_id_cv.set(None)
+        # Context var is now managed internally by get_async_db_session_with_rls
+        # if "current_user_id_cv" in locals() and current_user_id_cv.get() is not None:
+        #     current_user_id_cv.set(None)
+        pass # No explicit reset needed
 
 
 # --- Worker Lifecycle ---

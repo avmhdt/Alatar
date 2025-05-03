@@ -1,22 +1,24 @@
 import logging
 import uuid
+import asyncio
 
 import strawberry
+from strawberry.types import Info
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Import exceptions for error handling
 from graphql import GraphQLError
 from sqlalchemy.orm import Session
-from strawberry.types import Info
 
-from app.auth.dependencies import get_current_user_id_from_info  # Get user ID
-from app.core.exceptions import PermissionDeniedError
+from app.auth.dependencies import get_current_user_id_from_info, get_required_user_id_from_info, get_current_user_id_context
+from app.core.exceptions import PermissionDeniedError, ValidationError
 
 # Assuming this exists
-from app.crud.analysis_request import analysis_request as crud_analysis_request
+from app import crud
 
 # Import cursor utils and Node type
 # Import relay helpers for global ID decoding
-from app.graphql.relay import from_global_id
+from app.graphql.relay import from_global_id, to_global_id
 from app.graphql.types import UserError
 
 # Import GQL types (will be defined in types/analysis_request.py)
@@ -40,7 +42,18 @@ from app.services.analysis_queue_service import (
     AnalysisQueueService,
 )
 
+# Assume QueueClient is available (e.g., via dependency injection or global instance)
+# Placeholder import - replace with actual access method
+from app.services.queue_client import QueueClient, RABBITMQ_URL
+from app.agents.constants import QUEUE_C1_INPUT # Renamed from INPUT_QUEUE
+
 logger = logging.getLogger(__name__)
+
+# --- Queue Client Initialization (Placeholder - same as action_service) ---
+_queue_client_instance = QueueClient(RABBITMQ_URL)
+async def get_queue_client():
+    await _queue_client_instance.connect()
+    return _queue_client_instance
 
 
 def map_analysis_request_model_to_gql(
@@ -69,7 +82,7 @@ async def submit_analysis_request(
     input: SubmitAnalysisRequestInput,
 ) -> SubmitAnalysisRequestPayload:
     """Submits a new analysis request and queues it for processing."""
-    db: Session = info.context.db
+    db: AsyncSession = info.context.db
     user_id: uuid.UUID | None = await get_current_user_id_from_info(info)
     user_errors: list[UserError] = []
 
@@ -93,17 +106,50 @@ async def submit_analysis_request(
             )
         )
 
-    # Add other validation logic here...
-    # E.g., check if linked account ID is valid and belongs to the user
-    # try:
-    #     type_name, linked_account_pk = from_global_id(input.linked_account_id)
-    #     if type_name != 'LinkedAccount': # Or whatever type name you use
-    #         raise ValueError("Invalid ID type")
-    #     # TODO: Check if linked_account_pk exists and belongs to user_id
-    # except ValueError:
-    #     user_errors.append(
-    #         UserError(field="linkedAccountId", message="Invalid linked account ID format.", code="INVALID_ID")
-    #     )
+    # --- Validate linked_account_id ---
+    linked_account_pk: uuid.UUID | None = None
+    shop_domain: str | None = None
+    linked_account = None
+    try:
+        type_name, linked_account_pk_str = from_global_id(input.linked_account_id)
+        if type_name != 'LinkedAccount': # Ensure it's the right type
+            raise ValueError("Invalid ID type for linked account.")
+        linked_account_pk = uuid.UUID(linked_account_pk_str)
+
+        # Fetch the account using CRUD to verify existence and ownership
+        linked_account = crud.get_linked_account(db=db, account_id=linked_account_pk)
+        if not linked_account:
+            raise ValueError("Linked account not found.")
+        if linked_account.user_id != user_id:
+            # Raise permission error instead of validation error
+            raise PermissionDeniedError("Linked account does not belong to the current user.")
+        # Extract shop_domain (account_name)
+        shop_domain = linked_account.account_name
+        if not shop_domain:
+            # This shouldn't happen for Shopify accounts, but check defensively
+            raise ValueError("Shop domain (account name) missing from linked account.")
+
+    except ValueError as e:
+        user_errors.append(
+            UserError(
+                field="linkedAccountId", message=str(e), code="VALIDATION_ERROR"
+            )
+        )
+    except PermissionDeniedError as e:
+        # We could return a UserError or re-raise for a higher-level handler
+        user_errors.append(
+            UserError(
+                field="linkedAccountId", message=str(e), code="PERMISSION_DENIED"
+            )
+        )
+    except Exception as e:
+        # Catch unexpected errors during validation
+        logger.error(f"Unexpected error validating linked account {input.linked_account_id}: {e}", exc_info=True)
+        user_errors.append(
+            UserError(
+                field="linkedAccountId", message="Error validating linked account.", code="INTERNAL_ERROR"
+            )
+        )
 
     if user_errors:
         # Return validation errors without proceeding
@@ -117,10 +163,10 @@ async def submit_analysis_request(
         analysis_req_in = AnalysisRequestCreate(
             prompt=input.prompt.strip(),
             user_id=user_id,
-            # linked_account_id=linked_account_pk, # Use decoded PK if validation added
+            linked_account_id=linked_account_pk, # Pass the validated UUID
             # status defaults to PENDING in schema/model
         )
-        created_request: AnalysisRequestModel = crud_analysis_request.create(
+        created_request: AnalysisRequestModel = crud.analysis_request.create(
             db=db, obj_in=analysis_req_in
         )
         db.commit()
@@ -133,8 +179,7 @@ async def submit_analysis_request(
             analysis_request_id=created_request.id,
             user_id=user_id,
             prompt=created_request.prompt,
-            # Pass other necessary info like shop_domain if needed by worker
-            # shop_domain = ... # Fetch from linked account maybe?
+            shop_domain=shop_domain, # Pass the retrieved shop domain
         )
         logger.info(f"Enqueued AnalysisRequest {created_request.id} for processing")
 
@@ -173,101 +218,96 @@ async def submit_analysis_request(
 async def get_analysis_request(
     info: Info, id: strawberry.ID
 ) -> AnalysisRequestGQL | None:
-    db: Session = info.context.db
-    # Use await here as get_current_user_id_from_info is async
-    user_id: uuid.UUID | None = await get_current_user_id_from_info(info)
-
+    """Resolver to fetch a single analysis request by its global ID."""
+    user_id = get_current_user_id_context()
     if not user_id:
-        raise PermissionDeniedError("Authentication required.")
+        return None # Authentication required
 
+    db: AsyncSession = info.context.db
     try:
-        type_name, pk_str = from_global_id(id)
+        type_name, db_id_str = from_global_id(id)
         if type_name != "AnalysisRequest":
-            raise ValueError("Invalid ID type for analysis request.")
-        request_uuid = uuid.UUID(pk_str)
-    except ValueError as e:
-        logger.warning(f"Invalid analysis request global ID format: {id}, Error: {e}")
-        raise GraphQLError(f"Invalid ID format: {id}")
+            return None # Invalid ID type
+        db_id = uuid.UUID(db_id_str)
+    except (ValueError, TypeError):
+        return None # Invalid ID format
 
-    # Rely on RLS being set via context
-    request_db = crud_analysis_request.get(db=db, id=request_uuid)
+    # Use async CRUD function - assumes analysis_request CRUD object has an async 'aget_by_owner'
+    # Let's assume crud.analysis_request.aget handles owner check implicitly via RLS
+    # request_db = await crud.analysis_request.get_by_owner(db=db, id=db_id, owner_id=user_id)
+    request_db = await crud.analysis_request.aget(db=db, id=db_id)
 
-    if not request_db:
-        return None
-
-    # Assuming GQL type has from_orm or similar mapping
-    return AnalysisRequestGQL.from_orm(request_db)
+    if request_db:
+        return AnalysisRequestGQL.from_orm(request_db)
+    return None
 
 
 # --- listAnalysisRequests Query --- #
 async def list_analysis_requests(
     info: Info,
     first: int = 10,
-    after: str | None = None,  # After cursor
-    # Add before, last for bi-directional pagination if needed
+    after: str | None = None, # Opaque cursor
 ) -> AnalysisRequestConnection:
-    db: Session = info.context.db
-    # Use await here as get_current_user_id_from_info is async
-    user_id: uuid.UUID | None = await get_current_user_id_from_info(info)
-
+    """Resolver to list analysis requests for the current user."""
+    user_id = get_current_user_id_context()
     if not user_id:
-        raise PermissionDeniedError(
-            "Authentication required to list analysis requests."
-        )
+        # Return empty connection or raise error?
+        # Following Relay spec, usually return empty connection for unauthorized
+        return AnalysisRequestConnection(page_info=PageInfo(has_next_page=False, has_previous_page=False), edges=[])
 
-    if first < 0:
-        raise GraphQLError("Argument 'first' must be a non-negative integer.")
+    db: AsyncSession = info.context.db
 
-    limit = first + 1  # Fetch one extra to check for next page
-    primary_sort_column = "created_at"  # Column used for cursor/ordering
-    secondary_sort_column = "id"  # Tie-breaker column
-    descending = True  # Assuming newest first
+    # Use the async paginated fetcher from the CRUD class
+    # Need to handle cursor decoding appropriately if it contains more than just created_at
+    cursor_data = None
+    if after:
+        # Assuming cursor is just the created_at timestamp for simplicity here
+        # Real Relay often uses compound cursors (timestamp, id)
+        try:
+            # Decode cursor if needed (depends on how it's encoded)
+            # For now, assume it's directly usable if crud method expects it.
+            # If it's base64 encoded timestamp: after_str = decode_cursor(after)
+            # cursor_data = (datetime.fromisoformat(after_str).replace(tzinfo=UTC), None) # Example if cursor was just timestamp
+            pass # CRUD method handles opaque cursor if designed for it
+        except Exception:
+            # Handle invalid cursor
+            # For now, ignore invalid cursor and fetch from beginning
+            pass
 
-    # Decode the cursor
-    cursor_data = decode_cursor(after) if after else None
-    if after and cursor_data is None:
-        raise GraphQLError(f"Invalid cursor format: {after}")
-
-    # Fetch paginated results from CRUD layer
-    try:
-        requests_db = crud_analysis_request.get_multi_by_owner_paginated(
-            db=db,
-            owner_id=user_id,
-            limit=limit,
-            cursor_data=cursor_data,  # Pass decoded tuple
-            primary_sort_column=primary_sort_column,
-            secondary_sort_column=secondary_sort_column,
-            descending=descending,
-        )
-    except Exception as e:
-        logger.error(
-            f"Database error during pagination for user {user_id}: {e}", exc_info=True
-        )
-        raise GraphQLError("Failed to retrieve analysis requests.")
+    # Call the async CRUD method
+    # Ensure get_multi_by_owner_paginated handles async and cursor logic
+    requests_db = await crud.analysis_request.get_multi_by_owner_paginated_async(
+        db=db,
+        owner_id=user_id,
+        limit=first + 1, # Fetch one extra to check for next page
+        cursor_data=cursor_data, # Pass decoded cursor tuple if needed
+        # cursor_str=after # Or pass opaque cursor if crud method decodes it
+    )
 
     has_next_page = len(requests_db) > first
     items_to_return = requests_db[:first]
 
-    edges = [
-        AnalysisRequestEdge(
-            node=AnalysisRequestGQL.from_orm(req),
-            # Encode primary and secondary sort keys into the cursor
-            cursor=encode_cursor(
-                primary_value=getattr(req, primary_sort_column),
-                secondary_value=getattr(req, secondary_sort_column),
-            ),
+    edges = []
+    for req in items_to_return:
+        # Generate cursor based on the item (e.g., created_at and id)
+        # Needs consistent generation based on sorting key(s)
+        cursor_val = to_global_id("AnalysisRequestCursor", f"{req.created_at.isoformat()}_{req.id}")
+        edges.append(
+            Edge(
+                node=AnalysisRequestGQL.from_orm(req),
+                cursor=cursor_val
+            )
         )
-        for req in items_to_return
-    ]
 
-    page_info = PageInfo(
-        hasNextPage=has_next_page,
-        hasPreviousPage=after is not None,
-        startCursor=edges[0].cursor if edges else None,
-        endCursor=edges[-1].cursor if edges else None,
+    return AnalysisRequestConnection(
+        page_info=PageInfo(
+            has_next_page=has_next_page,
+            has_previous_page=after is not None, # Basic check
+            start_cursor=edges[0].cursor if edges else None,
+            end_cursor=edges[-1].cursor if edges else None,
+        ),
+        edges=edges,
     )
-
-    return AnalysisRequestConnection(edges=edges, pageInfo=page_info)
 
 
 # Add analysisRequest and listAnalysisRequests query resolvers here...

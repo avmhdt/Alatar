@@ -11,12 +11,16 @@ from app.models.analysis_request import AnalysisRequest
 # Placeholder for GQL/Pydantic types if service needs to return specific errors
 # from app.graphql.types import InputValidationError, NotFoundError, BasePayload ...
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 async def get_analysis_request_by_id(
     db: Session, request_id: uuid.UUID, user_id: uuid.UUID
 ) -> AnalysisRequest | None:
     """Fetch a single analysis request by ID, ensuring it belongs to the user."""
-    print(
+    logger.info(
         f"[Service Placeholder] Fetching AnalysisRequest {request_id} for user {user_id}"
     )
     # return db.query(AnalysisRequest).filter(
@@ -33,7 +37,7 @@ async def list_analysis_requests(
     cursor: str | None = None,  # Implement cursor logic based on e.g., created_at or id
 ) -> list[AnalysisRequest]:
     """List analysis requests for a user with pagination."""
-    print(
+    logger.info(
         f"[Service Placeholder] Listing AnalysisRequests for user {user_id} (limit={limit}, cursor={cursor})"
     )
     # query = db.query(AnalysisRequest).filter(AnalysisRequest.user_id == user_id)
@@ -47,7 +51,7 @@ async def submit_new_request(
     db: Session, user_id: uuid.UUID, prompt: str
 ) -> AnalysisRequest | str:  # Return model on success, error message string on failure
     """Create a new AnalysisRequest and potentially publish a task."""
-    print(
+    logger.info(
         f"[Service Placeholder] Submitting new request for user {user_id} with prompt: '{prompt[:50]}...'"
     )
     # try:

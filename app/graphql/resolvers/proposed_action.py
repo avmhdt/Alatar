@@ -6,6 +6,8 @@ from typing import cast
 import strawberry
 from fastapi import BackgroundTasks  # Import BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from strawberry.types import Info
 
 from app.database import get_db_session
 from app.graphql.types import (
@@ -35,6 +37,18 @@ from app.services.action_executor import (
     execute_approved_action,
 )
 
+# Import pagination PageInfo
+from app.graphql.types.analysis_request import PageInfo
+
+# Import the service for execution
+from app.services.action_execution_service import ActionExecutionService
+
+# Import the async service function
+from app.services.action_service import approve_action, reject_action, list_pending_actions
+
+# Import the relay helpers
+from app.graphql.relay import from_global_id, to_global_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,229 +71,110 @@ def map_action_model_to_gql(action: ProposedActionModel) -> ProposedAction:
     )
 
 
-# Resolver for listing pending actions
-def list_proposed_actions(
-    info: strawberry.Info,
+async def list_proposed_actions(
+    info: Info,
     first: int = 10,
     after: strawberry.relay.ConnectionCursor | None = None,
 ) -> ProposedActionConnection:
-    db: Session = next(get_db_session())
-    user_id = get_validated_user_id(info)
+    """Resolver to list pending proposed actions for the current user."""
+    user_id = get_current_user_id_context()
+    if not user_id:
+        return ProposedActionConnection(page_info=PageInfo(has_next_page=False, has_previous_page=False), edges=[])
 
-    logger.info(
-        f"Listing proposed actions for user {user_id} (first: {first}, after: {after})"
-    )
+    db: AsyncSession = info.context.db
 
-    query = db.query(ProposedActionModel).filter(
-        ProposedActionModel.user_id == user_id,
-        ProposedActionModel.status == ProposedActionStatus.PROPOSED,
-    )
-
-    # Apply cursor logic (assuming cursor is based on created_at for simplicity)
-    if after:
-        try:
-            # Decode cursor to get the timestamp of the last item in the previous page
-            after_timestamp = decode_cursor(
-                cast(str, after)
-            )  # Assuming cursor is datetime string
-            if isinstance(after_timestamp, datetime):
-                query = query.filter(ProposedActionModel.created_at > after_timestamp)
-            else:
-                logger.warning(
-                    f"Decoded cursor is not a datetime: {after_timestamp}. Ignoring cursor."
-                )
-        except Exception as e:
-            logger.warning(
-                f"Failed to decode or apply cursor '{after}': {e}. Ignoring cursor."
-            )
-
-    # Order by creation time (ascending for forward pagination)
-    query = query.order_by(ProposedActionModel.created_at.asc())
-
-    # Fetch one more item than requested to determine if there's a next page
-    actions = query.limit(first + 1).all()
-
-    has_next_page = len(actions) > first
-    items_to_return = actions[:first]
-
-    edges = [
-        ProposedActionEdge(
-            node=map_action_model_to_gql(action),
-            cursor=encode_cursor(action.created_at),  # Encode the sort key (created_at)
+    # Call the async service function (which handles pagination)
+    try:
+        # Assuming cursor is base64 encoded simple value (like created_at)
+        # Service function handles decoding/logic
+        items_db, has_next_page = await list_pending_actions(
+            db=db,
+            user_id=user_id,
+            limit=first,
+            cursor=after # Pass opaque cursor
         )
-        for action in items_to_return
-    ]
+    except Exception as e:
+        logger.error(f"Error listing proposed actions for user {user_id}: {e}")
+        # Return empty connection on error
+        return ProposedActionConnection(page_info=PageInfo(has_next_page=False, has_previous_page=False), edges=[])
+
+    edges = []
+    for action in items_db:
+        # Create cursor based on item (e.g., using created_at)
+        # Needs a consistent method, using global ID for now
+        cursor_val = to_global_id("ProposedAction", action.id)
+        edges.append(
+            ProposedActionEdge(
+                node=ProposedAction.from_orm(action),
+                cursor=cursor_val # Simple cursor example
+            )
+        )
 
     return ProposedActionConnection(
-        edges=edges,
-        pageInfo=strawberry.relay.PageInfo(
-            hasNextPage=has_next_page,
-            hasPreviousPage=bool(
-                after
-            ),  # Basic check, might need more logic for accurate backward pagination
-            startCursor=edges[0].cursor if edges else None,
-            endCursor=edges[-1].cursor if edges else None,
+        page_info=PageInfo(
+            has_next_page=has_next_page,
+            has_previous_page=after is not None,
+            start_cursor=edges[0].cursor if edges else None,
+            end_cursor=edges[-1].cursor if edges else None,
         ),
+        edges=edges,
     )
 
 
-# Resolver for approving an action
-def user_approves_action(
-    info: strawberry.Info,
-    input: UserApproveActionInput,
-    background_tasks: BackgroundTasks,  # Inject BackgroundTasks
+async def user_approves_action(
+    info: Info, input: UserApproveActionInput
 ) -> UserApproveActionPayload:
-    db: Session = next(get_db_session())
-    user_id = get_validated_user_id(info)
-    payload = UserApproveActionPayload(userErrors=[])
+    """Resolver to approve a proposed action."""
+    user_id = get_current_user_id_context()
+    if not user_id:
+        return UserApproveActionPayload(userErrors=[UserError(message="Authentication required.")])
 
+    db: AsyncSession = info.context.db
     try:
-        action_uuid = uuid.UUID(input.action_id)
-        logger.info(f"User {user_id} attempting to approve action {action_uuid}")
+        type_name, db_id_str = from_global_id(input.action_id)
+        if type_name != "ProposedAction":
+             return UserApproveActionPayload(userErrors=[UserError(message="Invalid action ID type.", field="actionId")])
+        action_uuid = uuid.UUID(db_id_str)
+    except (ValueError, TypeError):
+        return UserApproveActionPayload(userErrors=[UserError(message="Invalid action ID format.", field="actionId")])
 
-        # Use with_for_update() to lock the row during the check and update
-        action = (
-            db.query(ProposedActionModel)
-            .filter(
-                ProposedActionModel.id == action_uuid,
-                ProposedActionModel.user_id == user_id,
-            )
-            .with_for_update()
-            .first()
+    # Call the async service function
+    result = await approve_action(db=db, user_id=user_id, action_id=action_uuid)
+
+    if isinstance(result, ProposedAction):
+        # Approved successfully (or approved but execution failed, status reflects this)
+        return UserApproveActionPayload(
+            proposed_action=ProposedAction.from_orm(result)
         )
-
-        if not action:
-            payload.userErrors.append(
-                UserError(
-                    message=f"Action {input.action_id} not found.", field="actionId"
-                )
-            )
-            return payload
-
-        if action.status != ProposedActionStatus.PROPOSED:
-            payload.userErrors.append(
-                UserError(
-                    message=f"Action {input.action_id} is not in 'proposed' state (current: {action.status.value}).",
-                    field="actionId",
-                )
-            )
-            # No need to rollback if we just read
-            return payload
-
-        # Mark as approved (initially)
-        action.status = ProposedActionStatus.APPROVED
-        action.approved_at = datetime.utcnow()  # Use UTC
-        db.commit()  # Commit the status change
-        logger.info(f"Action {action_uuid} status set to APPROVED by user {user_id}")
-
-        # Add the execution logic to background tasks
-        # Pass necessary data (action_id) that is safe to serialize/pass
-        # The background task will need its own DB session scope
-        try:
-            logger.info(f"Adding action {action_uuid} execution to background tasks.")
-            # NOTE: Passing the db session directly to background task is problematic.
-            # The background task should acquire its own session.
-            # We will modify execute_approved_action to handle this.
-            background_tasks.add_task(execute_approved_action, action_id=action_uuid)
-            logger.info(f"Execution task added for action {action_uuid}")
-        except Exception as task_err:
-            # Handle errors adding the task itself (rare)
-            logger.error(
-                f"Error adding execution task for action {action_uuid} to background: {task_err}",
-                exc_info=True,
-            )
-            # Optionally revert status or log critical failure
-            # Revert status back to PROPOSED if triggering fails?
-            # action.status = ProposedActionStatus.PROPOSED
-            # action.approved_at = None
-            # db.commit()
-            payload.userErrors.append(
-                UserError(message="Failed to schedule action execution.")
-            )
-            # Return immediately as the trigger failed
-            # Refresh action state before returning?
-            db.refresh(action)
-            payload.result = map_action_model_to_gql(action)
-            return payload
-
-        # Refresh action state AFTER commit and BEFORE mapping to GQL
-        db.refresh(action)
-        # Return the action in its 'APPROVED' state (execution happens async)
-        payload.result = map_action_model_to_gql(action)
-
-    except ValueError:
-        payload.userErrors.append(
-            UserError(message="Invalid action ID format.", field="actionId")
-        )
-        db.rollback()  # Rollback on format error
-    except Exception as e:
-        db.rollback()
-        logger.exception(
-            f"Error approving action {input.action_id} for user {user_id}: {e}"
-        )
-        payload.userErrors.append(
-            UserError(message="An unexpected server error occurred during approval.")
-        )
-
-    return payload
+    else:
+        # Service returned an error message string
+        return UserApproveActionPayload(userErrors=[UserError(message=result)])
 
 
-# Resolver for rejecting an action
-def user_rejects_action(
-    info: strawberry.Info, input: UserRejectActionInput
+async def user_rejects_action(
+    info: Info, input: UserRejectActionInput
 ) -> UserRejectActionPayload:
-    db: Session = next(get_db_session())
-    user_id = get_validated_user_id(info)
-    payload = UserRejectActionPayload(userErrors=[])
+    """Resolver to reject a proposed action."""
+    user_id = get_current_user_id_context()
+    if not user_id:
+        return UserRejectActionPayload(userErrors=[UserError(message="Authentication required.")])
 
+    db: AsyncSession = info.context.db
     try:
-        action_uuid = uuid.UUID(input.action_id)
-        logger.info(f"User {user_id} attempting to reject action {action_uuid}")
+        type_name, db_id_str = from_global_id(input.action_id)
+        if type_name != "ProposedAction":
+             return UserRejectActionPayload(userErrors=[UserError(message="Invalid action ID type.", field="actionId")])
+        action_uuid = uuid.UUID(db_id_str)
+    except (ValueError, TypeError):
+        return UserRejectActionPayload(userErrors=[UserError(message="Invalid action ID format.", field="actionId")])
 
-        action = (
-            db.query(ProposedActionModel)
-            .filter(
-                ProposedActionModel.id == action_uuid,
-                ProposedActionModel.user_id == user_id,
-            )
-            .first()
+    # Call the async service function
+    result = await reject_action(db=db, user_id=user_id, action_id=action_uuid)
+
+    if isinstance(result, ProposedAction):
+        return UserRejectActionPayload(
+            proposed_action=ProposedAction.from_orm(result)
         )
-
-        if not action:
-            payload.userErrors.append(
-                UserError(
-                    message=f"Action {input.action_id} not found.", field="actionId"
-                )
-            )
-            return payload
-
-        if action.status != ProposedActionStatus.PROPOSED:
-            payload.userErrors.append(
-                UserError(
-                    message=f"Action {input.action_id} is not in 'proposed' state (current: {action.status.value}).",
-                    field="actionId",
-                )
-            )
-            return payload
-
-        action.status = ProposedActionStatus.REJECTED
-        db.commit()
-        db.refresh(action)
-        logger.info(f"Action {action_uuid} status set to REJECTED by user {user_id}")
-
-        payload.result = map_action_model_to_gql(action)
-
-    except ValueError:
-        payload.userErrors.append(
-            UserError(message="Invalid action ID format.", field="actionId")
-        )
-    except Exception as e:
-        db.rollback()
-        logger.exception(
-            f"Error rejecting action {input.action_id} for user {user_id}: {e}"
-        )
-        payload.userErrors.append(
-            UserError(message="An unexpected server error occurred during rejection.")
-        )
-
-    return payload
+    else:
+        # Service returned an error message string
+        return UserRejectActionPayload(userErrors=[UserError(message=result)])

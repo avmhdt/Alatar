@@ -20,6 +20,13 @@ class LinkedAccount(Base):
         LargeBinary, nullable=False
     )  # Store encrypted access token, etc.
     scopes = Column(Text)  # Store granted scopes (comma-separated or JSON)
+    # Add status field as per design doc
+    status = Column(
+        String(50),
+        nullable=False,
+        default='active',
+        index=True
+    )
     # Add other metadata as needed (e.g., expiry, refresh token placeholder)
     # expires_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())

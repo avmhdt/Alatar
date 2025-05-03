@@ -25,6 +25,15 @@ class AnalysisRequest(Base):
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
+    # Add ForeignKey link to the specific account being analyzed
+    linked_account_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("linked_accounts.id"),
+        nullable=True, # Make nullable initially? Or require it?
+        index=True,
+        # Design doc had NULL allowed, let's stick to that for now.
+        # If required, change nullable=False and update resolver/schema.
+    )
     prompt = Column(Text, nullable=False)
     status = Column(
         SQLAlchemyEnum(AnalysisRequestStatus),
@@ -44,6 +53,8 @@ class AnalysisRequest(Base):
 
     # Relationship to User
     user = relationship("User", back_populates="analysis_requests")
+    # Add relationship to LinkedAccount
+    linked_account = relationship("LinkedAccount") # No back_populates needed if LA doesn't link back
     # Relationship to AgentTasks
     agent_tasks = relationship(
         "AgentTask", back_populates="analysis_request", cascade="all, delete-orphan"

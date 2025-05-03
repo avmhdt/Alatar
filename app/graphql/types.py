@@ -9,6 +9,8 @@ import strawberry
 
 # Import schemas for Pydantic integration
 from app import schemas
+from app.schemas.user import User as UserSchema
+from app.schemas.user import UserCreate as UserCreateSchema
 
 # Import Enums from models
 from app.models.analysis_request import AnalysisRequestStatus
@@ -152,7 +154,7 @@ class BasePayload:
 
 
 # User type based on Pydantic schema
-@strawberry.experimental.pydantic.type(model=schemas.User, all_fields=True)
+@strawberry.experimental.pydantic.type(model=UserSchema, all_fields=True)
 class User:
     pass
 
@@ -250,7 +252,7 @@ class RejectActionPayload(BasePayload):
 
 
 # Auth inputs
-@strawberry.experimental.pydantic.input(model=schemas.UserCreate)
+@strawberry.experimental.pydantic.input(model=UserCreateSchema)
 class UserRegisterInput:
     pass
 

@@ -55,7 +55,7 @@ class SubmitAnalysisRequestInput:
 
     prompt: str = strawberry.field(description="The user's prompt for analysis.")
     linked_account_id: strawberry.ID = strawberry.field(
-        description="The global ID of the LinkedAccount (e.g., Shopify store) to analyze."
+        description="The Global ID of the LinkedAccount (e.g., Shopify store) to analyze."
     )
 
 

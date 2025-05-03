@@ -1,9 +1,14 @@
 import json
 import logging
+from typing import TYPE_CHECKING
 
 from redis import asyncio as aioredis
 
 from app.core.config import settings
+
+# Import the Pydantic model for type hinting
+if TYPE_CHECKING:
+    from app.schemas.pubsub import AnalysisRequestUpdateData
 
 logger = logging.getLogger(__name__)
 
@@ -64,17 +69,15 @@ def get_analysis_update_channel(request_id: str) -> str:
     return f"analysis_request_updates:{request_id}"
 
 
-async def publish_analysis_update_to_redis(request_id: str, update_data: dict) -> None:
-    """Publishes analysis update data (as JSON string) to the relevant Redis channel."""
+async def publish_analysis_update_to_redis(request_id: str, update_data: 'AnalysisRequestUpdateData') -> None:
+    """Publishes analysis update data (as Pydantic model) to the relevant Redis channel."""
     redis = await get_redis_connection()
     channel = get_analysis_update_channel(request_id)
     try:
-        # Serialize the update data to JSON before publishing
-        message = json.dumps(update_data)
+        # Serialize the Pydantic model to JSON using its method
+        message = update_data.model_dump_json()
         await redis.publish(channel, message)
         logger.debug(f"Published update to Redis channel {channel}: {message}")
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to serialize update data to JSON for {channel}: {e}")
     except aioredis.RedisError as e:
         logger.error(f"Redis error publishing to {channel}: {e}")
     except Exception as e:

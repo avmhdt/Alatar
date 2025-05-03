@@ -2,13 +2,24 @@ import logging
 import uuid
 from typing import Any
 
+# --- Tenacity for Retries --- #
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+# --- End Tenacity --- #
+
 # from langchain_openai import ChatOpenAI # Removed direct import
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables import RunnableLambda
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.constants import AgentTaskStatus
+# Use the constant for retry limit
+from app.agents.constants import DEFAULT_RETRY_LIMIT, AgentTaskStatus
 from app.agents.prompts import (
     format_quantitative_analysis_prompt,
 )
@@ -49,12 +60,25 @@ class QuantitativeAnalysisInput(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
+# Define retry parameters
+# Retry on general exceptions for now, refine if specific transient errors are known
+retry_exceptions = (Exception,)
+stop_conditions = stop_after_attempt(DEFAULT_RETRY_LIMIT + 1)
+wait_conditions = wait_exponential(multiplier=1, min=2, max=30)
 
+@retry(
+    stop=stop_conditions,
+    wait=wait_conditions,
+    retry=retry_if_exception_type(retry_exceptions),
+    before_sleep=before_sleep_log(logger, logging.WARNING), # Log before sleep on retry
+    reraise=True # Re-raise the last exception after retries are exhausted
+)
 async def _perform_quantitative_analysis(
     input_data: QuantitativeAnalysisInput,
 ) -> dict[str, Any]:
     """Performs quantitative analysis using an LLM based on the provided instructions and data.
     Updates task status via the placeholder _update_task_status function.
+    This function includes tenacity retry logic.
     """
     log_props = _get_qa_log_props(input_data)
     db_session = input_data.db
@@ -71,20 +95,32 @@ async def _perform_quantitative_analysis(
         # We might not be able to update status if db is missing
         return {"status": "error", "error_message": error_msg, "task_id": task_id}
 
-    # Use await for status update
+    # --- Status Update: Set to RUNNING (or RETRYING by utils) --- #
+    # This will run on the first attempt and subsequent retries
+    is_first_attempt = True # Simplistic way, tenacity context is better if needed
     try:
-        await update_agent_task_status(db_session, task_id, AgentTaskStatus.RUNNING)
-        logger.info("Starting quantitative analysis.", extra={"props": log_props})
+        # Determine if this is a retry attempt to set RETRYING status
+        # Tenacity context isn't easily accessible here without class structure
+        # Relying on update_agent_task_status internal logic (if it checks retry_count)
+        # or just setting RUNNING each time is acceptable for now.
+        current_status = AgentTaskStatus.RUNNING # Assume RUNNING unless logic determines RETRYING
+
+        # Check current status from DB before updating? Could add overhead.
+        # Let's assume setting RUNNING/RETRYING via utils is sufficient.
+        # The `update_agent_task_status` util likely needs `retry_count` passed.
+        # For simplicity here, we won't fetch the attempt number from tenacity context.
+
+        await update_agent_task_status(db_session, task_id, current_status) # Pass retry_count if util handles it
+        logger.info("Quantitative analysis attempt starting.", extra={"props": log_props})
+
     except Exception as update_err:
         logger.error(
-            f"Failed to update status to RUNNING: {update_err}",
+            f"Failed to update status before processing: {update_err}",
             extra={"props": log_props},
         )
-        return {
-            "status": "error",
-            "error_message": f"DB Error setting status: {update_err}",
-            "task_id": task_id,
-        }
+        # If status update fails, we probably shouldn't proceed. Raise to trigger retry/failure.
+        raise RuntimeError(f"DB Error setting status: {update_err}") from update_err
+    # --- End Status Update --- #
 
     try:
         logger.info(
@@ -131,30 +167,26 @@ async def _perform_quantitative_analysis(
         }
 
     except Exception as e:
-        logger.exception(
-            "Error during quantitative analysis",
-            exc_info=True,
+        # This block is reached if the core logic fails on a given attempt
+        logger.warning(
+            f"Error during quantitative analysis attempt: {e}",
+            exc_info=True, # Log traceback for the warning
             extra={"props": log_props},
         )
         error_message = str(e)
-        # Use await for status update
-        try:
-            await update_agent_task_status(
-                db_session,
-                task_id,
-                AgentTaskStatus.FAILED,
-                error_message=error_message,
-            )
-        except Exception as final_update_err:
-            logger.error(
-                f"Failed to update status to FAILED after error: {final_update_err}",
-                extra={"props": log_props},
-            )
-        return {
-            "status": "error",
-            "error_message": error_message,
-            "task_id": task_id,
-        }
+        # --- Update Status to FAILED on Final Attempt --- #
+        # The retry decorator (`reraise=True`) will re-raise the exception after exhaustion.
+        # The caller (worker callback) should catch this final exception and mark as FAILED.
+        # However, setting FAILED here *before* raising ensures DB state is updated
+        # even if the caller fails to handle the exception properly.
+        # We only do this if we detect it's the last attempt (difficult without context)
+        # Alternative: Let the caller handle the final FAILED status update.
+
+        # For now, let's rely on the caller (worker callback) to handle the final FAILED status
+        # based on the exception raised by tenacity after exhaustion.
+        # We will just raise the exception here to trigger tenacity's retry/reraise.
+        raise e
+        # --- End Final Status Update Logic --- #
 
 
 # Instantiate the runnable for this department

@@ -3,6 +3,7 @@ import logging
 import os
 import uuid
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
@@ -92,60 +93,85 @@ def get_db():
 
 
 # --- Async Dependency to get DB session (for Workers/Agents) ---
+# Simplified: Just provides a session, RLS handled by specific context manager below
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     session: AsyncSession = AsyncSessionLocal()
-    user_id = current_user_id_cv.get()  # Get user_id from context var (set upstream)
-    # logger.debug(f"Getting ASYNC DB session. User ID from context: {user_id}")
+    # logger.debug("Getting plain ASYNC DB session.")
+    try:
+        yield session
+        await session.commit()
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in async session: {e}", exc_info=True)
+        await session.rollback()
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in async session: {e}", exc_info=True)
+        await session.rollback()
+        raise
+    finally:
+        # logger.debug("Closing plain ASYNC DB session.")
+        await session.close()
 
+# --- New Async Context Manager with RLS --- #
+@asynccontextmanager
+async def get_async_db_session_with_rls(user_id: uuid.UUID) -> AsyncGenerator[AsyncSession, None]:
+    """Provides an async DB session with RLS context set for the given user_id."""
+    if not isinstance(user_id, uuid.UUID):
+        raise TypeError("user_id must be a valid UUID")
+
+    session: AsyncSession = AsyncSessionLocal()
+    cv_token = None
     rls_set_success = False
-    if user_id:
-        try:
-            # Explicitly set RLS context variable for the transaction
-            await session.execute(
-                text("SET LOCAL app.current_user_id = :user_id"),
-                {"user_id": str(user_id)},
-            )
-            # logger.debug(f"Set RLS user ID: {user_id} for async session")
-            rls_set_success = True
-        except Exception as e:
-            logger.error(
-                f"Failed to set RLS user ID for async session (User: {user_id}): {e}"
-            )
-            # Important: Rollback and close if RLS setting fails
-            await session.rollback()
-            await session.close()
-            current_user_id_cv.set(None)  # Clear context var
-            raise  # Propagate error
+    log_props = {"user_id": str(user_id)}
 
-    # Only yield if RLS was set successfully (or if no user_id was present)
-    if rls_set_success or not user_id:
-        try:
-            yield session
-            await session.commit()
-        except SQLAlchemyError as e:
-            logger.error(
-                f"Database error in async session (User: {user_id}): {e}", exc_info=True
-            )
-            await session.rollback()
-            raise
-        except Exception as e:
-            logger.error(
-                f"Unexpected error in async session (User: {user_id}): {e}",
-                exc_info=True,
-            )
-            await session.rollback()
-            raise
-        finally:
-            # logger.debug(f"Closing ASYNC DB session for user {user_id}.")
-            # Explicitly reset RLS context variable before closing
-            if rls_set_success:  # Only reset if it was successfully set
-                try:
-                    await session.execute(text("RESET app.current_user_id;"))
-                    # logger.debug(f"Reset RLS user ID: {user_id} for async session")
-                except Exception as e:
-                    # Log error, but proceed with closing
-                    logger.warning(
-                        f"Failed to reset RLS user ID for async session (User: {user_id}): {e}"
-                    )
-            await session.close()
-            current_user_id_cv.set(None)  # Explicitly clear context var
+    try:
+        # 1. Set ContextVar
+        cv_token = current_user_id_cv.set(user_id)
+        # logger.debug(f"RLS Context Manager: Set current_user_id_cv", extra={"props": log_props})
+
+        # 2. Set RLS session variable
+        await session.execute(
+            text("SET LOCAL app.current_user_id = :user_id"),
+            {"user_id": str(user_id)},
+        )
+        rls_set_success = True
+        # logger.debug(f"RLS Context Manager: Set session variable", extra={"props": log_props})
+
+        # 3. Yield session
+        yield session
+
+        # 4. Commit if context exits without error
+        await session.commit()
+        # logger.debug(f"RLS Context Manager: Committed session", extra={"props": log_props})
+
+    except SQLAlchemyError as e:
+        logger.error(
+            f"RLS Context Manager: Database error", exc_info=True, extra={"props": log_props}
+        )
+        await session.rollback()
+        raise
+    except Exception as e:
+        logger.error(
+            f"RLS Context Manager: Unexpected error", exc_info=True, extra={"props": log_props}
+        )
+        await session.rollback()
+        raise
+    finally:
+        # 5. Reset RLS Session Variable (if set successfully)
+        if rls_set_success:
+            try:
+                await session.execute(text("RESET app.current_user_id;"))
+                # logger.debug(f"RLS Context Manager: Reset session variable", extra={"props": log_props})
+            except Exception as reset_err:
+                logger.warning(
+                    f"RLS Context Manager: Failed to reset RLS variable",
+                    exc_info=reset_err,
+                    extra={"props": log_props}
+                )
+        # 6. Close Session
+        await session.close()
+        # logger.debug(f"RLS Context Manager: Closed session", extra={"props": log_props})
+        # 7. Reset ContextVar (if set)
+        if cv_token:
+            current_user_id_cv.reset(cv_token)
+            # logger.debug(f"RLS Context Manager: Reset current_user_id_cv", extra={"props": log_props})

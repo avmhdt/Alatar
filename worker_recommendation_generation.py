@@ -24,71 +24,13 @@ from app.agents.departments.recommendation_generation import (
 
 # Updated Queue
 from app.agents.utils import update_agent_task_status
-from app.database import AsyncSessionLocal, current_user_id_cv
+from app.database import AsyncSessionLocal, current_user_id_cv, get_async_db_session_with_rls
 from app.services.queue_client import RABBITMQ_URL, QueueClient
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("worker_recommendation_generation")  # Updated Logger Name
-
-
-@asynccontextmanager
-async def get_db_session_with_context(
-    user_id: uuid.UUID,
-) -> AsyncGenerator[AsyncSession, None]:
-    """Provides an async DB session context manager with RLS context set."""
-    db: AsyncSession = AsyncSessionLocal()
-    rls_set_success = False
-    if user_id:
-        try:
-            await db.execute(
-                text("SET LOCAL app.current_user_id = :user_id"),
-                {"user_id": str(user_id)},
-            )
-            rls_set_success = True
-        except Exception as e:
-            logger.error(
-                f"Failed to set RLS context for user {user_id} in RG worker: {e}",
-                exc_info=True,
-                extra={"props": {"user_id": str(user_id)}},
-            )
-            await db.rollback()
-            await db.close()
-            current_user_id_cv.set(None)
-            raise
-
-    if rls_set_success or not user_id:
-        try:
-            yield db
-            await db.commit()
-        except SQLAlchemyError as e:
-            logger.error(
-                f"Database error during session for user {user_id} in RG worker: {e}",
-                exc_info=True,
-                extra={"props": {"user_id": str(user_id)}},
-            )
-            await db.rollback()
-            raise
-        except Exception as e:
-            logger.error(
-                f"Unexpected error during session for user {user_id} in RG worker: {e}",
-                exc_info=True,
-                extra={"props": {"user_id": str(user_id)}},
-            )
-            await db.rollback()
-            raise
-        finally:
-            if rls_set_success:
-                try:
-                    await db.execute(text("RESET app.current_user_id;"))
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to reset RLS context for user {user_id} in RG worker: {e}",
-                        extra={"props": {"user_id": str(user_id)}},
-                    )
-            await db.close()
-            current_user_id_cv.set(None)
 
 
 async def process_recommendation_generation_message(
@@ -145,7 +87,6 @@ async def process_recommendation_generation_message(
             task_id = uuid.UUID(task_id_str)
             user_id = uuid.UUID(user_id_str)
             analysis_request_id = uuid.UUID(analysis_request_id_str)
-            current_user_id_cv.set(user_id)  # Set context var
             # Update props with UUID strings
             log_props["task_id"] = str(task_id)
             log_props["user_id"] = str(user_id)
@@ -155,7 +96,6 @@ async def process_recommendation_generation_message(
                 "Invalid UUID format in RG message",
                 extra={"props": {**log_props, "raw_data": data}},
             )
-            current_user_id_cv.set(None)
             return False
 
         logger.info("Processing RG Task", extra={"props": log_props})
@@ -163,7 +103,7 @@ async def process_recommendation_generation_message(
         runnable_success = False
         runnable_error_message = "Task processing failed unexpectedly."
 
-        async with get_db_session_with_context(user_id) as db:  # db is AsyncSession
+        async with get_async_db_session_with_rls(user_id) as db:  # db is AsyncSession
             try:
                 # Let runnable handle status updates
                 # recommendation_prompt = task_details.get("recommendation_prompt", "Generate recommendations...")
@@ -261,10 +201,6 @@ async def process_recommendation_generation_message(
         )
         # Attempting DB update is difficult here
         return False
-    finally:
-        # Ensure context var is reset
-        if "current_user_id_cv" in locals() and current_user_id_cv.get() is not None:
-            current_user_id_cv.set(None)
 
 
 stop_event = asyncio.Event()

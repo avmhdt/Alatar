@@ -1,6 +1,11 @@
 from enum import Enum
+import uuid
+import datetime
+from django.utils.translation import gettext_lazy as _
 
 import strawberry
+from strawberry.types import Node
+from strawberry.types.node import to_global_id
 
 # Import base UserError if needed for payloads, or define payloads elsewhere
 # from .user_error import UserError
@@ -8,12 +13,25 @@ import strawberry
 
 # Corresponds to DB model LinkedAccount
 @strawberry.type
-class LinkedAccount:
-    id: strawberry.ID  # Use strawberry.ID for global identification
-    provider: str  # e.g., "shopify"
-    account_identifier: str  # e.g., shop domain "your-store.myshopify.com"
-    status: str  # e.g., "active", "inactive", "revoked"
-    scopes: list[str]  # List of granted OAuth scopes
+class LinkedAccount(Node):
+    """Represents an external account linked by the user (e.g., Shopify store)."""
+    db_id: uuid.UUID = strawberry.field(directives=[strawberry.directive.Include(if_=False)])
+
+    @strawberry.field
+    def id(self) -> strawberry.ID:
+        return to_global_id("LinkedAccount", self.db_id)
+
+    account_type: str
+    account_name: str | None = None
+    scopes: list[str] = strawberry.field(default_factory=list) # Often better as list
+    status: str # Add status field
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    # Add resolver for scopes to parse from string if needed
+    # @strawberry.field
+    # def scopes(self) -> list[str]:
+    #     return self.scopes.split(',') if self.scopes else []
 
 
 # Corresponds to user settings

@@ -8,6 +8,7 @@ C2_QUANTITATIVE_ANALYSIS_QUEUE = "q.c2.quantitative_analysis"
 C2_QUALITATIVE_ANALYSIS_QUEUE = "q.c2.qualitative_analysis"
 C2_RECOMMENDATION_GENERATION_QUEUE = "q.c2.recommendation_generation"
 # Add other C2 queues as needed...
+QUEUE_ACTION_EXECUTION = "q.action_execution" # Queue for executing approved actions
 # Example response queue pattern (optional, depending on C1/C2 communication design)
 # RESPONSE_QUEUE_PREFIX = "q.response."
 

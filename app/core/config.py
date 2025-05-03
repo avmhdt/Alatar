@@ -22,6 +22,9 @@ class Settings(BaseSettings):
         ..., env="APP_SECRET_KEY"
     )  # Must be 32 url-safe base64-encoded bytes
 
+    # Frontend URL (for redirects)
+    FRONTEND_URL: str = Field(..., env="FRONTEND_URL")
+
     # Shopify OAuth
     SHOPIFY_API_KEY: str | None = Field(None, env="SHOPIFY_API_KEY")
     SHOPIFY_API_SECRET: str | None = Field(None, env="SHOPIFY_API_SECRET")
@@ -46,6 +49,8 @@ class Settings(BaseSettings):
     # LangSmith / OpenTelemetry (Optional for now)
     LANGSMITH_API_KEY: str | None = Field(None, env="LANGSMITH_API_KEY")
     LANGSMITH_PROJECT: str | None = Field("Alatar", env="LANGSMITH_PROJECT")
+    # OPENTELEMETRY_ENABLED flag to control setup
+    OPENTELEMETRY_ENABLED: bool = Field(False, env="OPENTELEMETRY_ENABLED")
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = Field(
         None, env="OTEL_EXPORTER_OTLP_ENDPOINT"
     )
@@ -86,9 +91,7 @@ class Settings(BaseSettings):
     )  # Adjust as needed
 
     # pgcrypto Symmetric Key (Load from environment)
-    PGCRYPTO_SYM_KEY: str = os.getenv(
-        "PGCRYPTO_SYM_KEY", "default_pgcrypto_key_change_me"
-    )  # Key for pgcrypto functions
+    PGCRYPTO_SYM_KEY: str = Field(..., env="PGCRYPTO_SYM_KEY") # Mandatory key for pgcrypto functions
 
     # Redis configuration
     REDIS_HOST: str = Field(..., env="REDIS_HOST")
@@ -110,5 +113,6 @@ settings = Settings()
 # Example usage: print(settings.DATABASE_URL)
 
 # Basic validation
-if not settings.PGCRYPTO_SYM_KEY:
-    print("Warning: PGCRYPTO_SYM_KEY is missing. pgcrypto functions will likely fail.")
+# REMOVED: No longer needed as Field(...) enforces presence
+# if not settings.PGCRYPTO_SYM_KEY:
+#     print("Warning: PGCRYPTO_SYM_KEY is missing. pgcrypto functions will likely fail.")

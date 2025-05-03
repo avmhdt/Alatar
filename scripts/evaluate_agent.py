@@ -24,6 +24,10 @@ from langsmith.utils import LangSmithError
 # os.environ["LANGCHAIN_API_KEY"] = "YOUR_LANGSMITH_API_KEY"
 # os.environ["LANGCHAIN_PROJECT"] = "YOUR_LANGSMITH_PROJECT_NAME" # Optional: Project name
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def load_agent():
     """Load the agent runnable to be evaluated."""
@@ -31,37 +35,37 @@ def load_agent():
         # Adjust the import path based on your actual agent orchestrator structure
         from app.agents.orchestrator import get_graph_runnable
 
-        print("Loading agent from app.agents.orchestrator...")
+        logger.info("Loading agent from app.agents.orchestrator...")
         # Assuming get_graph_runnable requires no arguments or uses env vars for config
         agent_runnable = get_graph_runnable()
         return agent_runnable
     except ImportError as e:
-        print(f"Warning: Could not import agent orchestrator: {e}")
-        print("Using placeholder agent for evaluation.")
+        logger.error(f"Warning: Could not import agent orchestrator: {e}")
+        logger.info("Using placeholder agent for evaluation.")
         return lambda inputs: {"output": f"Processed: {inputs.get('input', '')}"}
     except Exception as e:
-        print(f"Error loading agent: {e}")
-        print("Using placeholder agent for evaluation.")
+        logger.error(f"Error loading agent: {e}")
+        logger.info("Using placeholder agent for evaluation.")
         return lambda inputs: {"output": f"Processed: {inputs.get('input', '')}"}
 
 
 def load_dataset_from_langsmith(client: Client, dataset_name: str) -> list | None:
     """Attempts to load the dataset from LangSmith."""
     try:
-        print(f"Attempting to load dataset '{dataset_name}' from LangSmith...")
+        logger.info(f"Attempting to load dataset '{dataset_name}' from LangSmith...")
         examples = list(client.list_examples(dataset_name=dataset_name))
         if not examples:
-            print(f"Dataset '{dataset_name}' is empty or not found in LangSmith.")
+            logger.debug(f"Dataset '{dataset_name}' is empty or not found in LangSmith.")
             return None
-        print(
+        logger.info(
             f"Successfully loaded {len(examples)} examples from LangSmith dataset '{dataset_name}'."
         )
         return examples
     except LangSmithError as e:
-        print(f"LangSmith API error loading dataset '{dataset_name}': {e}")
+        logger.error(f"LangSmith API error loading dataset '{dataset_name}': {e}")
         return None
     except Exception as e:
-        print(f"Unexpected error loading dataset '{dataset_name}' from LangSmith: {e}")
+        logger.error(f"Unexpected error loading dataset '{dataset_name}' from LangSmith: {e}")
         return None
 
 
@@ -70,10 +74,10 @@ def load_dataset_from_local_file(
 ) -> list | None:
     """Loads the dataset from a local JSON Lines file."""
     if not file_path.is_file():
-        print(f"Error: Local benchmark file not found at {file_path}")
+        logger.error(f"Error: Local benchmark file not found at {file_path}")
         return None
 
-    print(f"Loading dataset from local file: {file_path}")
+    logger.info(f"Loading dataset from local file: {file_path}")
     examples = []
     try:
         with open(file_path, encoding="utf-8") as f:
@@ -82,13 +86,13 @@ def load_dataset_from_local_file(
                     try:
                         examples.append(json.loads(line))
                     except json.JSONDecodeError as e:
-                        print(
+                        logger.warning(
                             f"Warning: Skipping invalid JSON on line {i+1} in {file_path}: {e}"
                         )
-        print(f"Successfully loaded {len(examples)} examples from {file_path}.")
+        logger.info(f"Successfully loaded {len(examples)} examples from {file_path}.")
         return examples
     except Exception as e:
-        print(f"Error reading local benchmark file {file_path}: {e}")
+        logger.error(f"Error reading local benchmark file {file_path}: {e}")
         return None
 
 
@@ -97,8 +101,8 @@ def evaluate_agent():
     try:
         client = Client()
     except LangSmithError as e:
-        print(f"Error initializing LangSmith client: {e}")
-        print(
+        logger.error(f"Error initializing LangSmith client: {e}")
+        logger.info(
             "Please ensure LANGCHAIN_API_KEY and other environment variables are set."
         )
         return
@@ -112,7 +116,7 @@ def evaluate_agent():
         dataset = load_dataset_from_local_file()
 
     if dataset is None or not dataset:
-        print("Error: No dataset loaded. Cannot run evaluation.")
+        logger.error("Error: No dataset loaded. Cannot run evaluation.")
         return
 
     # Define evaluation metrics/functions (customize as needed)
@@ -127,7 +131,7 @@ def evaluate_agent():
         return {"key": "output_length_gt_5", "score": False}
 
     try:
-        print(f"Starting evaluation with {len(dataset)} examples...")
+        logger.info(f"Starting evaluation with {len(dataset)} examples...")
         results = evaluate(
             agent_runnable,
             data=dataset,  # Use the loaded dataset
@@ -142,14 +146,14 @@ def evaluate_agent():
             # prediction_key="output", # Default: LangSmith uses the 'output' key from the run outputs
             # reference_key="output", # Default: LangSmith uses the 'outputs' key from the dataset examples
         )
-        print("Evaluation completed. Results:")
+        logger.info("Evaluation completed. Results:")
         # Results object contains detailed information, often best viewed in LangSmith UI
-        print(results)
+        logger.info(results)
 
     except LangSmithError as e:
-        print(f"An error occurred during LangSmith evaluation: {e}")
+        logger.error(f"An error occurred during LangSmith evaluation: {e}")
     except Exception as e:
-        print(f"An unexpected error occurred during evaluation: {e}")
+        logger.error(f"An unexpected error occurred during evaluation: {e}")
 
 
 if __name__ == "__main__":

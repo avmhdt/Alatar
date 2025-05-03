@@ -107,7 +107,7 @@ async def _example_publisher(topic: str):
 
 async def _example_subscriber(topic: str, id: int):
     async for message in subscribe(topic):
-        print(f"Subscriber {id} received: {message}")
+        logger.info(f"Subscriber {id} received: {message}")
         # Simulate processing
         await asyncio.sleep(0.1)
 
@@ -131,11 +131,11 @@ async def _main_example():
     try:
         await sub1_task
     except asyncio.CancelledError:
-        print("Subscriber 1 cancelled cleanly.")
+        logger.info("Subscriber 1 cancelled cleanly.")
     try:
         await sub2_task
     except asyncio.CancelledError:
-        print("Subscriber 2 cancelled cleanly.")
+        logger.info("Subscriber 2 cancelled cleanly.")
 
 
 if __name__ == "__main__":

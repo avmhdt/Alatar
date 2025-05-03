@@ -38,6 +38,7 @@ from app.core.redis_client import (
 from app.database import (
     AsyncSessionLocal,
     current_user_id_cv,
+    get_async_db_session_with_rls,
 )
 
 # Import new redis publisher
@@ -51,6 +52,9 @@ from app.models.analysis_request import AnalysisRequestStatus
 
 # Import queue client and constants
 from app.services.queue_client import QUEUE_C1_INPUT, RABBITMQ_URL, QueueClient
+
+# Import the new Pydantic model for Pub/Sub updates
+from app.schemas.pubsub import AnalysisRequestUpdateData
 
 # Configure logging
 logging.basicConfig(
@@ -67,121 +71,51 @@ COMPILED_C1_ORCHESTRATOR: StateGraph | None = None  # Initialize as None
 # --- Database Context Management ---
 
 
-@asynccontextmanager
-async def get_db_session_with_context(
-    user_id: uuid.UUID,
-) -> AsyncGenerator[AsyncSession, None]:
-    """Provides an ASYNC DB session with the RLS user context set."""
-    session: AsyncSession = AsyncSessionLocal()
-    rls_set_success = False
-    if user_id:
-        try:
-            # Explicitly set RLS context variable for the transaction
-            from sqlalchemy import text
-
-            await session.execute(
-                text("SET LOCAL app.current_user_id = :user_id"),
-                {"user_id": str(user_id)},
-            )
-            # logger.debug(f"Set app.current_user_id = {user_id} for session")
-            rls_set_success = True
-        except Exception as e:
-            logger.error(
-                f"Failed to set RLS context for user {user_id}: {e}",
-                exc_info=True,
-                extra={"props": {"user_id": str(user_id)}},
-            )
-            await session.rollback()
-            await session.close()
-            current_user_id_cv.set(None)
-            raise
-    else:
-        # If no user_id, proceed without setting RLS
-        pass
-
-    # Only yield if RLS was set successfully or if no user_id was present
-    if rls_set_success or not user_id:
-        try:
-            yield session
-            await (
-                session.commit()
-            )  # Commit changes if context manager exits without error
-        except SQLAlchemyError as e:
-            logger.error(
-                f"Database error during async session for user {user_id}: {e}",
-                exc_info=True,
-                extra={"props": {"user_id": str(user_id)}},
-            )
-            await session.rollback()
-            raise  # Re-raise SQLAlchemy errors
-        except Exception as e:
-            logger.error(
-                f"Unexpected error during async session for user {user_id}: {e}",
-                exc_info=True,
-                extra={"props": {"user_id": str(user_id)}},
-            )
-            await session.rollback()
-            raise  # Re-raise other exceptions
-        finally:
-            # Explicitly reset RLS context variable before closing
-            if rls_set_success:  # Only reset if it was successfully set
-                try:
-                    await session.execute(text("RESET app.current_user_id;"))
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to reset RLS user ID for async session (User: {user_id}): {e}"
-                    )
-            await session.close()
-            current_user_id_cv.set(None)  # Ensure context var is cleared
+# REMOVED Local get_db_session_with_context - Use shared utility from app.database now
+# @asynccontextmanager
+# async def get_db_session_with_context(...):
+#    ...
 
 
 # --- Message Processing Logic ---
 
 
-# Helper to map DB model to GQL dict for publishing
-def map_db_to_gql_dict(req: AnalysisRequestModel) -> dict[str, Any]:
-    result_gql = None
-    if req.result:
-        try:
-            # Assuming req.result stores a dict compatible with AnalysisResult
-            result_data = (
-                json.loads(req.result) if isinstance(req.result, str) else req.result
-            )
-            # Temporary fix: Check if result_data is a dict before accessing keys
-            if isinstance(result_data, dict):
-                result_gql = AnalysisResult(
-                    summary=result_data.get("summary"),
-                    visualizations=result_data.get(
-                        "visualizations"
-                    ),  # TODO: Map visualizations if structure differs
-                    raw_data=result_data.get("raw_data"),
-                )
-            else:
-                # If result is not a dict (e.g., simple string from LLM), wrap it
-                result_gql = AnalysisResult(summary=str(result_data))
-        except Exception as e:
-            logger.error(
-                f"Failed to map result JSON/data to AnalysisResult GQL type: {e}"
-            )
-            # Handle error - maybe publish status without result?
+# Helper to map DB model to Pydantic model for publishing
+def map_db_to_pubsub_model(req: AnalysisRequestModel) -> AnalysisRequestUpdateData:
+    """Maps the DB model to the Pydantic model for Redis publishing."""
+    try:
+        # Directly validate the DB model instance into the Pydantic model
+        # Pydantic automatically handles fields like prompt, error_message, created_at etc.
+        # It also converts Enum status to its value (string) based on how the enum is defined.
+        # Need to ensure AnalysisRequestModel has required fields or handle missing ones.
+        
+        # Handle potential JSON string in result field if needed
+        result_data = req.result
+        if isinstance(result_data, str):
+            try:
+                result_data = json.loads(result_data)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse JSON in result field for AR {req.id}, keeping as string.")
+                # Keep as string if parsing fails
 
-    # TODO: Fetch proposed actions if they should be included in updates
-    return {
-        "id": str(req.id),  # Use simple ID for now, Relay GlobalID might need context
-        "prompt": req.prompt,
-        "status": req.status.value if hasattr(req.status, "value") else str(req.status),
-        # "result": result_gql, # Pass the mapped result object/dict - needs fix if AnalysisResult isn't JSON serializable directly
-        "result_summary": result_gql.summary if result_gql else None,
-        "result_data": result_gql.rawData
-        if result_gql
-        else None,  # Example if rawData is needed
-        "error_message": req.error_message,
-        "created_at": req.created_at.isoformat() if req.created_at else None,
-        "updated_at": req.updated_at.isoformat() if req.updated_at else None,
-        "completed_at": req.completed_at.isoformat() if req.completed_at else None,
-        "user_id": str(req.user_id),
-        "proposed_actions": [],  # Placeholder
-    }
+        update_data = AnalysisRequestUpdateData(
+            id=str(req.id),
+            user_id=str(req.user_id),
+            prompt=req.prompt,
+            status=req.status.value if hasattr(req.status, 'value') else str(req.status),
+            result=result_data, # Assign the parsed or original result
+            error_message=req.error_message,
+            created_at=req.created_at,
+            updated_at=req.updated_at,
+            completed_at=req.completed_at,
+            proposed_actions=[] # TODO: Populate proposed actions if available/needed
+        )
+        return update_data
+    except Exception as e:
+        # Log the error and potentially return a default/error state model?
+        logger.error(f"Error mapping AnalysisRequestModel to AnalysisRequestUpdateData for AR {req.id}: {e}", exc_info=True)
+        # Re-raise or handle as appropriate for the worker logic
+        raise
 
 
 async def process_message(message: AbstractIncomingMessage) -> bool:
@@ -237,7 +171,8 @@ async def process_message(message: AbstractIncomingMessage) -> bool:
         logger.info("Processing C1 Task", extra={"props": log_props})
 
         # Process within an ASYNC DB session with RLS context
-        async with get_db_session_with_context(user_id) as db:
+        # Use the shared RLS context manager from app.database
+        async with get_async_db_session_with_rls(user_id) as db:
             try:
                 # Fetch the request using await and select
                 from sqlalchemy.future import select  # Ensure select is imported
@@ -260,10 +195,11 @@ async def process_message(message: AbstractIncomingMessage) -> bool:
                 analysis_request.status = initial_status
                 db.add(analysis_request)
                 await db.flush()  # Use await for flush
-                # Prepare data and publish
-                gql_dict = map_db_to_gql_dict(analysis_request)
+                # Prepare data using the new Pydantic model mapper
+                update_payload = map_db_to_pubsub_model(analysis_request)
+                # Pass the model instance directly to the publisher
                 await publish_analysis_update_to_redis(
-                    str(analysis_request_id), gql_dict
+                    str(analysis_request_id), update_payload # Pass model instance
                 )
                 logger.info(
                     f"Published status update: {initial_status.value}",
@@ -351,32 +287,36 @@ async def process_message(message: AbstractIncomingMessage) -> bool:
                             "final_result", "No result generated."
                         )
                         try:
-                            # Ensure result is JSON serializable before saving
-                            if isinstance(final_result, (dict, list)):
-                                analysis_request.result = json.dumps(
+                            # Save result based on type: string to summary, dict/list to data
+                            if isinstance(final_result, str):
+                                analysis_request.result_summary = final_result
+                                analysis_request.result_data = None # Clear data field if result is simple string
+                            elif isinstance(final_result, (dict, list)):
+                                # Attempt to serialize complex results to JSONB data field
+                                analysis_request.result_data = json.dumps(
                                     final_result, default=str
                                 )
-                            elif isinstance(final_result, str):
-                                # If it's already a string, decide if it needs JSON wrapping
-                                # Let's store it as a simple JSON string for consistency
-                                analysis_request.result = json.dumps(final_result)
+                                # Optionally generate a summary if possible, or leave it blank
+                                analysis_request.result_summary = final_result.get("summary") or "Completed - see result_data for details." # Example summary generation
                             else:
-                                analysis_request.result = json.dumps(str(final_result))
+                                # Handle other types if necessary, maybe stringify to summary?
+                                analysis_request.result_summary = str(final_result)
+                                analysis_request.result_data = None
 
+                            logger.info(
+                                "Marking AnalysisRequest as COMPLETED.",
+                                extra={"props": log_props},
+                            )
+                            final_status_changed = True
                         except TypeError as json_err:
                             logger.error(
                                 f"Failed to serialize final_result: {json_err}",
                                 extra={"props": log_props},
                             )
-                            analysis_request.result = json.dumps(
+                            analysis_request.result_summary = json.dumps(
                                 {"error": "Result serialization failed"}
                             )
-
-                        logger.info(
-                            "Marking AnalysisRequest as COMPLETED.",
-                            extra={"props": log_props},
-                        )
-                        final_status_changed = True
+                            analysis_request.result_data = None
                 else:
                     logger.error(
                         "Graph invoke finished inconclusively.",
@@ -406,9 +346,11 @@ async def process_message(message: AbstractIncomingMessage) -> bool:
                 if final_status_changed:
                     # Refresh again before mapping to ensure all changes are loaded
                     await db.refresh(analysis_request)
-                    final_gql_dict = map_db_to_gql_dict(analysis_request)
+                    # Map to Pydantic model
+                    final_update_payload = map_db_to_pubsub_model(analysis_request)
+                    # Pass model instance directly to publisher
                     await publish_analysis_update_to_redis(
-                        str(analysis_request_id), final_gql_dict
+                        str(analysis_request_id), final_update_payload # Pass model instance
                     )
                     logger.info(
                         f"Published final status update: {analysis_request.status.value}",
@@ -452,8 +394,11 @@ async def process_message(message: AbstractIncomingMessage) -> bool:
         return False  # Reject message permanently
     finally:
         # Ensure context var is reset even if initial parsing fails
-        if "current_user_id_cv" in locals() and current_user_id_cv.get() is not None:
-            current_user_id_cv.set(None)
+        # Context var is now managed internally by get_async_db_session_with_rls
+        # No explicit reset needed here anymore if using the context manager correctly.
+        # if "current_user_id_cv" in locals() and current_user_id_cv.get() is not None:
+        #     current_user_id_cv.set(None)
+        pass # No explicit reset needed
 
 
 # --- Worker Lifecycle ---
@@ -474,7 +419,8 @@ async def main():
 
     try:
         logger.info("Compiling C1 Orchestrator Graph...")
-        # Pass the AsyncSessionLocal factory
+        # Pass the AsyncSessionLocal factory (still needed by checkpointer)
+        # The node wrapper now uses get_async_db_session_with_rls
         COMPILED_C1_ORCHESTRATOR = create_orchestrator_graph(
             db_session_factory=AsyncSessionLocal
         )

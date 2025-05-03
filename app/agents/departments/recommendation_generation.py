@@ -4,6 +4,16 @@ import re
 import uuid
 from typing import Any
 
+# --- Tenacity for Retries --- #
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+# --- End Tenacity --- #
+
 # from langchain_openai import ChatOpenAI # Removed direct import
 from langchain_core.output_parsers import (
     StrOutputParser,
@@ -16,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # from app.models.agent_task import AgentTask
 # from app.services.database import SessionLocal
-from app.agents.constants import AgentTaskStatus
+from app.agents.constants import DEFAULT_RETRY_LIMIT, AgentTaskStatus
 from app.agents.prompts import (
     format_recommendation_generation_prompt,
 )
@@ -106,12 +116,23 @@ def _parse_action_details(
         )
     return action_type, description, parameters
 
+# Define retry parameters
+retry_exceptions = (Exception,)
+stop_conditions = stop_after_attempt(DEFAULT_RETRY_LIMIT + 1)
+wait_conditions = wait_exponential(multiplier=1, min=2, max=30)
 
+@retry(
+    stop=stop_conditions,
+    wait=wait_conditions,
+    retry=retry_if_exception_type(retry_exceptions),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True
+)
 async def _generate_recommendations(
     input_data: RecommendationGenerationInput,
 ) -> dict[str, Any]:
     """Generates recommendations using an LLM based on prior analysis results.
-    Updates task status via the placeholder _update_task_status function.
+    Updates task status. Includes tenacity retry logic.
     Potentially uses tools for context or proposes HITL actions in the future.
     """
     log_props = _get_rg_log_props(input_data)
@@ -122,19 +143,18 @@ async def _generate_recommendations(
     recommendation_prompt_instr = input_data.recommendation_prompt
     analysis_results = input_data.analysis_results
 
+    # --- Status Update: Set to RUNNING (or RETRYING by utils) --- #
     try:
-        await update_agent_task_status(db_session, task_id, AgentTaskStatus.RUNNING)
-        logger.info("Starting recommendation generation.", extra={"props": log_props})
+        current_status = AgentTaskStatus.RUNNING
+        await update_agent_task_status(db_session, task_id, current_status)
+        logger.info("Recommendation generation attempt starting.", extra={"props": log_props})
     except Exception as update_err:
         logger.error(
-            f"Failed to update status to RUNNING: {update_err}",
+            f"Failed to update status before processing: {update_err}",
             extra={"props": log_props},
         )
-        return {
-            "status": "error",
-            "error_message": f"DB Error setting status: {update_err}",
-            "task_id": task_id,
-        }
+        raise RuntimeError(f"DB Error setting status: {update_err}") from update_err
+    # --- End Status Update --- #
 
     try:
         logger.info(
@@ -172,6 +192,7 @@ async def _generate_recommendations(
                 proposal_log_props = {**log_props, "proposed_action_type": action_type}
                 try:
                     # Ensure create_proposed_action is async and use await
+                    # This operation is now part of the retried block
                     await create_proposed_action(
                         db=db_session,
                         user_id=user_id,
@@ -182,11 +203,16 @@ async def _generate_recommendations(
                     )
                     proposed_action_count += 1
                 except Exception:
+                    # Log the error but allow the overall process to potentially continue
+                    # Retrying the whole generation might create duplicate actions if not careful
+                    # Consider making create_proposed_action idempotent or handling errors differently
                     logger.error(
-                        "Failed to create proposed action",
+                        "Failed to create proposed action during generation attempt (will retry potentially)",
                         exc_info=True,
                         extra={"props": proposal_log_props},
                     )
+                    # Re-raise to trigger retry of the whole generation step
+                    raise
             else:
                 logger.warning(
                     "Failed to parse/validate action block",
@@ -220,30 +246,14 @@ async def _generate_recommendations(
         }
 
     except Exception as e:
-        logger.exception(
-            "Error during recommendation generation",
+        # Log warning for the failed attempt
+        logger.warning(
+            f"Error during recommendation generation attempt: {e}",
             exc_info=True,
             extra={"props": log_props},
         )
-        error_message = str(e)
-        # Use await for status update
-        try:
-            await update_agent_task_status(
-                db_session,
-                task_id,
-                AgentTaskStatus.FAILED,
-                error_message=error_message,
-            )
-        except Exception as final_update_err:
-            logger.error(
-                f"Failed to update status to FAILED after error: {final_update_err}",
-                extra={"props": log_props},
-            )
-        return {
-            "status": "error",
-            "error_message": error_message,
-            "task_id": task_id,
-        }
+        # Let tenacity handle retry/reraise - final FAILED status by worker callback
+        raise e
 
 
 # Instantiate the runnable for this department

@@ -5,6 +5,8 @@ from typing import TypeVar
 
 import strawberry
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from strawberry.types import Info
 
 from app.models.analysis_request import AnalysisRequest as AnalysisRequestModel
@@ -82,21 +84,23 @@ async def get_node(info: Info, global_id: strawberry.ID) -> Node | None:
         return None
 
     db_model, gql_type = NODE_MAP[type_name]
-    db: Session = info.context.db
+    # Expect AsyncSession from context now
+    db: AsyncSession = info.context.db
 
-    # Fetch from DB using primary key
-    # Assumes primary key is 'id' and potentially a UUID
-    # Adjust fetching logic based on your models' primary keys
+    # Fetch from DB using primary key (Async)
     try:
-        # Attempt UUID conversion if it looks like one, otherwise use raw string
-        # This needs refinement based on actual PK types
+        # Attempt UUID conversion
         try:
             pk = uuid.UUID(pk_str)
         except ValueError:
-            pk = pk_str  # Use the string PK if not a UUID
+            pk = pk_str
 
-        # Use RLS context implicitly provided via session
-        db_obj = db.get(db_model, pk)
+        # Use await db.get() or await db.execute(select...)
+        # db.get is simpler if PK is consistently named 'id' or configured
+        # Using execute for more general approach
+        stmt = select(db_model).filter_by(id=pk) # Assumes PK column is named 'id'
+        result = await db.execute(stmt)
+        db_obj = result.scalars().first()
 
     except Exception as e:
         logger.error(

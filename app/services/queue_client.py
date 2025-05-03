@@ -72,6 +72,9 @@ class QueueClient:
             await self.declare_queue(QUEUE_C2_DATA_RETRIEVAL, use_dlq=True)
             await self.declare_queue(QUEUE_C2_QUANTITATIVE_ANALYSIS, use_dlq=True)
             # Add declarations for other essential queues if known upfront
+            # Declare action execution queue
+            from app.agents.constants import QUEUE_ACTION_EXECUTION # Import late to avoid circularity if constants imports QueueClient
+            await self.declare_queue(QUEUE_ACTION_EXECUTION, use_dlq=True)
         except Exception as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}", exc_info=True)
             self._connection = None

@@ -5,26 +5,43 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import desc
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.graphql.types import decode_cursor
 from app.models.proposed_action import ProposedAction, ProposedActionStatus
 
 # Import other necessary models if needed
 # Import the executor function directly
-from app.services.action_executor import _execute_action_logic
+# from app.services.action_executor import _execute_action_logic
+
+# Assume QueueClient is available (e.g., via dependency injection or global instance)
+# Placeholder import - replace with actual access method
+from app.services.queue_client import QueueClient, RABBITMQ_URL
+from app.agents.constants import QUEUE_ACTION_EXECUTION # Import new queue name
 
 logger = logging.getLogger(__name__)
 
 # Placeholder for GQL/Pydantic types if service needs to return specific errors
 # from app.graphql.types import InputValidationError, NotFoundError, BasePayload ...
 
+# --- Queue Client Initialization (Placeholder) ---
+# In a real app, manage this through app lifecycle or dependency injection
+# This is a simplified example assuming direct instantiation here
+# Global instance for simplicity in this example, NOT recommended for production
+_queue_client_instance = QueueClient(RABBITMQ_URL)
+async def get_queue_client():
+    await _queue_client_instance.connect()
+    return _queue_client_instance
+# Remember to handle closing the client connection on app shutdown
+
 
 async def create_proposed_action(
-    db: Session,
+    db: AsyncSession,
     user_id: uuid.UUID,
     analysis_request_id: uuid.UUID,
+    linked_account_id: uuid.UUID,
     action_type: str,
     description: str,
     parameters: dict[str, Any],
@@ -33,9 +50,10 @@ async def create_proposed_action(
 
     Args:
     ----
-        db: The SQLAlchemy Session object.
+        db: The SQLAlchemy AsyncSession object.
         user_id: The ID of the user this action belongs to.
         analysis_request_id: The ID of the analysis request that generated this action.
+        linked_account_id: The ID of the linked account this action targets.
         action_type: A string identifying the type of action (e.g., 'update_product_metafield').
         description: A human-readable description of the proposed action.
         parameters: A dictionary containing parameters needed to execute the action.
@@ -58,14 +76,15 @@ async def create_proposed_action(
     new_action = ProposedAction(
         user_id=user_id,
         analysis_request_id=analysis_request_id,
+        linked_account_id=linked_account_id,
         action_type=action_type,
         description=description,
         parameters=parameters,
         status=ProposedActionStatus.PROPOSED,
     )
     db.add(new_action)
-    db.commit()
-    db.refresh(new_action)
+    await db.commit()
+    await db.refresh(new_action)
     # Audit Log
     logger.info(
         "Proposed action created",
@@ -84,7 +103,7 @@ async def create_proposed_action(
 
 
 async def list_pending_actions(
-    db: Session,
+    db: AsyncSession,
     user_id: uuid.UUID,
     limit: int = 10,
     cursor: str | None = None,  # Expects base64 encoded cursor
@@ -95,7 +114,7 @@ async def list_pending_actions(
     # )
     order_by_column = ProposedAction.created_at
     order_direction_func = desc
-    query = db.query(ProposedAction).filter(
+    stmt = select(ProposedAction).filter(
         ProposedAction.user_id == user_id,
         ProposedAction.status == ProposedActionStatus.PROPOSED,
     )
@@ -105,12 +124,13 @@ async def list_pending_actions(
             cursor_value_dt = datetime.fromisoformat(cursor_value_str).replace(
                 tzinfo=UTC
             )
-            query = query.filter(order_by_column < cursor_value_dt)
+            stmt = stmt.filter(order_by_column < cursor_value_dt)
         except Exception as e:
             logger.warning(f"Failed to decode or apply cursor '{cursor}': {e}")
             return [], False
-    query = query.order_by(order_direction_func(order_by_column)).limit(limit + 1)
-    results = query.all()
+    stmt = stmt.order_by(order_direction_func(order_by_column)).limit(limit + 1)
+    result = await db.execute(stmt)
+    results = list(result.scalars().all())
     has_next_page = len(results) > limit
     items = results[:limit]
     # logger.debug(f"Found {len(results)} items. Has next: {has_next_page}. Returning {len(items)}.")
@@ -133,19 +153,20 @@ ACTION_SCOPES = {
 
 
 async def approve_action(
-    db: Session, user_id: uuid.UUID, action_id: uuid.UUID
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    action_id: uuid.UUID
 ) -> ProposedAction | str:
-    """Approve a proposed action, mark as approved, and trigger execution logic."""
+    """Approve a proposed action, mark as approved, and enqueue for background execution."""
     logger.info(f"Attempting to approve action {action_id} for user {user_id}")
-    action = (
-        db.query(ProposedAction)
-        .filter(ProposedAction.id == action_id, ProposedAction.user_id == user_id)
-        .with_for_update()
-        .first()
-    )
+    stmt = select(ProposedAction).filter(
+        ProposedAction.id == action_id,
+        ProposedAction.user_id == user_id
+    ).with_for_update()
+    result = await db.execute(stmt)
+    action = result.scalar_one_or_none()
 
     if not action:
-        # Audit Log Attempt Failed
         logger.warning(
             "Action approval failed: Not found or not owned",
             extra={
@@ -159,7 +180,6 @@ async def approve_action(
         return f"Action {action_id} not found or not owned by user."
 
     if action.status != ProposedActionStatus.PROPOSED:
-        # Audit Log Attempt Failed
         logger.warning(
             f"Action approval failed: Invalid state ({action.status.value})",
             extra={
@@ -173,20 +193,15 @@ async def approve_action(
         )
         return f"Action {action_id} is not in a proposed state (current: {action.status.value})."
 
-    # --- Scope Check Removed - Handled by Executor --- #
-
-    # --- Mark as Approved and Trigger Execution --- #
-    execution_error_message = None
     try:
-        # Mark as approved
         action.status = ProposedActionStatus.APPROVED
         action.approved_at = datetime.now(UTC)
-        action.execution_logs = "Action approved by user."
-        db.commit()  # Commit the APPROVED status
-        db.refresh(action)
-        # Audit Log Approved
+        action.execution_logs = "Action approved by user. Queued for execution."
+        db.add(action)
+        await db.commit()
+        await db.refresh(action)
         logger.info(
-            "Proposed action approved",
+            "Proposed action approved and status committed.",
             extra={
                 "audit": True,
                 "audit_event": "ACTION_APPROVED",
@@ -196,42 +211,42 @@ async def approve_action(
             },
         )
 
-        # Call the executor logic (which contains scope checks, client init, execution, status updates)
-        # Pass the existing DB session
-        logger.info(f"Calling action executor for action {action_id}.")
-        _execute_action_logic(db, action_id)
-        logger.info(f"Action executor finished for action {action_id}.")
+        try:
+            queue_client = await get_queue_client()
+            message_body = {
+                "action_id": str(action.id),
+                "user_id": str(action.user_id),
+            }
+            await queue_client.publish_message(QUEUE_ACTION_EXECUTION, message_body)
+            logger.info(
+                f"Action {action.id} enqueued for execution.",
+                extra={
+                    "audit": True,
+                    "audit_event": "ACTION_ENQUEUED",
+                    "user_id": str(user_id),
+                    "action_id": str(action_id),
+                    "queue": QUEUE_ACTION_EXECUTION,
+                },
+            )
+        except Exception as queue_err:
+            logger.exception(
+                f"Failed to enqueue action {action.id} after approval: {queue_err}",
+                extra={
+                    "audit": True,
+                    "audit_event": "ACTION_ENQUEUE_FAILED",
+                    "user_id": str(user_id),
+                    "action_id": str(action_id),
+                }
+            )
+            await db.rollback()
+            action.execution_logs += f"\nCRITICAL: Failed to enqueue for execution: {queue_err}"
+            return f"Action {action.id} approved but FAILED TO ENQUEUE. Please retry or contact support."
 
-        # Refresh the action object to get the final status set by the executor
-        db.refresh(action)
-
-        # Check the final status set by the executor
-        if action.status == ProposedActionStatus.FAILED:
-            execution_error_message = (
-                action.execution_logs or "Execution failed with unknown reason."
-            )
-            logger.warning(
-                f"Action {action_id} failed during execution: {execution_error_message}"
-            )
-            # Return the error message from the execution logs
-            return f"Action approved but failed during execution: {execution_error_message}"
-        elif action.status == ProposedActionStatus.EXECUTED:
-            logger.info(f"Action {action_id} executed successfully by executor.")
-            return action  # Return the successful action
-        else:
-            # Should not happen if executor logic is correct
-            logger.error(
-                f"Action {action_id} ended in unexpected state {action.status.value} after execution."
-            )
-            return (
-                f"Action {action_id} ended in unexpected state: {action.status.value}"
-            )
+        return action
 
     except Exception as e:
-        # Catch errors during the approval process or potentially from the executor call if it raises unexpectedly
-        db.rollback()  # Rollback any changes from this function level
+        await db.rollback()
         logger.exception(f"Unexpected error during approve_action for {action_id}: {e}")
-        # Audit Log - Unexpected Error during Approval/Trigger
         logger.error(
             "Unexpected error during action approval/trigger",
             extra={
@@ -242,40 +257,37 @@ async def approve_action(
                 "error": str(e),
             },
         )
-        # Attempt to mark as failed if possible
         try:
-            action = (
-                db.query(ProposedAction).filter(ProposedAction.id == action_id).first()
-            )  # Re-fetch if needed
-            if action and action.status not in [
-                ProposedActionStatus.EXECUTED,
-                ProposedActionStatus.FAILED,
-                ProposedActionStatus.REJECTED,
-            ]:
-                action.status = ProposedActionStatus.FAILED
-                action.execution_logs = f"Failed during approval/trigger phase: {e}"
-                db.commit()
+            refetch_stmt = select(ProposedAction).filter(ProposedAction.id == action_id)
+            result = await db.execute(refetch_stmt)
+            fail_action = result.scalar_one_or_none()
+            if fail_action and fail_action.status == ProposedActionStatus.PROPOSED:
+                fail_action.status = ProposedActionStatus.FAILED
+                fail_action.execution_logs = f"Failed during approval phase: {e}"
+                db.add(fail_action)
+                await db.commit()
         except Exception as db_err:
             logger.error(
-                f"Failed to mark action {action_id} as FAILED after top-level error: {db_err}"
+                f"Failed to mark action {action_id} as FAILED after approval error: {db_err}"
             )
+
         return f"An unexpected error occurred while approving action {action_id}: {e}"
 
 
 async def reject_action(
-    db: Session, user_id: uuid.UUID, action_id: uuid.UUID
-) -> ProposedAction | str:  # Return model on success, error message string on failure
-    """Reject a proposed action."""
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    action_id: uuid.UUID
+) -> ProposedAction | str:
     logger.info(f"Attempting to reject action {action_id} for user {user_id}")
-    action = (
-        db.query(ProposedAction)
-        .filter(ProposedAction.id == action_id, ProposedAction.user_id == user_id)
-        .with_for_update()
-        .first()
-    )  # Lock row
+    stmt = select(ProposedAction).filter(
+        ProposedAction.id == action_id,
+        ProposedAction.user_id == user_id
+    ).with_for_update()
+    result = await db.execute(stmt)
+    action = result.scalar_one_or_none()
 
     if not action:
-        # Audit Log Attempt Failed
         logger.warning(
             "Action rejection failed: Not found or not owned",
             extra={
@@ -289,7 +301,6 @@ async def reject_action(
         return f"Action {action_id} not found or not owned by user."
 
     if action.status != ProposedActionStatus.PROPOSED:
-        # Audit Log Attempt Failed
         logger.warning(
             f"Action rejection failed: Invalid state ({action.status.value})",
             extra={
@@ -306,9 +317,9 @@ async def reject_action(
     try:
         action.status = ProposedActionStatus.REJECTED
         action.execution_logs = "Action rejected by user."
-        db.commit()
-        db.refresh(action)
-        # Audit Log Rejected
+        db.add(action)
+        await db.commit()
+        await db.refresh(action)
         logger.info(
             "Proposed action rejected",
             extra={
@@ -321,9 +332,8 @@ async def reject_action(
         )
         return action
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.exception(f"Failed to reject action {action_id}: {e}")
-        # Audit Log - Unexpected Error during Rejection
         logger.error(
             "Unexpected error during action rejection",
             extra={

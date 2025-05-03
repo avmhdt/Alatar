@@ -9,12 +9,15 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app import schemas
+from app.schemas.user import User
 from app.auth import service as auth_service
 from app.auth.dependencies import get_current_user_required as get_current_user
 from app.core.config import settings
 from app.database import get_db
-from app.models.user import User
 
+import logging
+
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 # --- Helper for Shopify HMAC Verification ---
@@ -96,7 +99,7 @@ def start_shopify_oauth(
         request.session["shopify_oauth_state"] = state
         # Optionally store the shop domain if needed on callback and not provided by Shopify (it usually is)
         # request.session['shopify_shop_domain'] = shop
-        print(
+        logger.info(
             f"Redirecting user {current_user.id} to Shopify for shop {shop}"
         )  # Add logging
         return RedirectResponse(url=auth_url)
@@ -131,13 +134,13 @@ def handle_shopify_callback(
     if not settings.SHOPIFY_API_SECRET or not verify_shopify_hmac(
         query_param_dict, settings.SHOPIFY_API_SECRET
     ):
-        print(f"HMAC verification failed for shop {shop}")  # Add logging
+        logger.error(f"HMAC verification failed for shop {shop}")  # Add logging
         raise HTTPException(status_code=403, detail="Invalid HMAC signature")
 
     # 2. Verify state (CSRF protection)
     stored_state = request.session.get("shopify_oauth_state")
     if not stored_state or not hmac.compare_digest(stored_state, state):
-        print(
+        logger.error(
             f"State verification failed for shop {shop}. Stored: {stored_state}, Received: {state}"
         )  # Add logging
         raise HTTPException(status_code=403, detail="Invalid state parameter")
@@ -155,7 +158,7 @@ def handle_shopify_callback(
         # associated_user = token_data.get('associated_user') # Info about the user who authorized
 
         if not access_token or not scopes:
-            print(
+            logger.error(
                 f"Failed to get token or scope from Shopify for shop {shop}"
             )  # Add logging
             raise HTTPException(
@@ -164,7 +167,7 @@ def handle_shopify_callback(
             )
 
         # 4. Store credentials, linking to the currently logged-in user
-        print(
+        logger.info(
             f"Storing credentials for user {current_user.id}, shop {shop}"
         )  # Add logging
         auth_service.store_shopify_credentials(
@@ -176,26 +179,26 @@ def handle_shopify_callback(
         )
 
         # 5. Redirect user to a success page in the frontend
-        # TODO: Make the redirect URL configurable
-        frontend_success_url = f"{settings.CORS_ALLOWED_ORIGINS[0].strip('/')}/settings/connections?success=shopify"
-        print(
+        # Use the dedicated FRONTEND_URL setting
+        frontend_success_url = f"{settings.FRONTEND_URL.strip('/')}/settings/connections?success=shopify"
+        logger.info(
             f"Successfully linked Shopify account for user {current_user.id}, shop {shop}"
         )  # Add logging
         return RedirectResponse(url=frontend_success_url)
 
     except ValueError as e:
         # Handle errors from service functions (e.g., config issues, token exchange failure)
-        print(f"Error during Shopify callback for shop {shop}: {e}")  # Add logging
+        logger.error(f"Error during Shopify callback for shop {shop}: {e}")  # Add logging
         raise HTTPException(status_code=400, detail=str(e))
     except requests.exceptions.RequestException as e:
-        print(
+        logger.error(
             f"HTTP Request error during Shopify callback for shop {shop}: {e}"
         )  # Add logging
         raise HTTPException(
             status_code=502, detail="Failed to communicate with Shopify"
         )
     except Exception as e:
-        print(
+        logger.error(
             f"Unexpected error during Shopify callback for shop {shop}: {e}"
         )  # Add logging
         # Generic error handler
@@ -205,18 +208,6 @@ def handle_shopify_callback(
 
 
 # Example route to test authentication (optional - now uses User model)
-# @router.get("/users/me", response_model=schemas.User)
+# @router.get("/users/me", response_model=User)
 # async def read_users_me(current_user: User = Depends(auth_service.get_current_user)):
 #     return current_user
-
-# Verify CSRF token
-csrf_token_cookie = request.cookies.get("csrf_token")
-csrf_token_header = request.headers.get("X-CSRF-Token")
-
-if not csrf_token_cookie or not csrf_token_header:
-    raise HTTPException(status_code=400, detail="CSRF token missing")
-# if csrf_token_cookie != csrf_token_header:
-if not hmac.compare_digest(
-    csrf_token_cookie, csrf_token_header
-):  # Use hmac.compare_digest
-    raise HTTPException(status_code=403, detail="CSRF token mismatch")

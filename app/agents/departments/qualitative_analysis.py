@@ -2,6 +2,16 @@ import logging
 import uuid
 from typing import Any
 
+# --- Tenacity for Retries --- #
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+# --- End Tenacity --- #
+
 # from langchain_openai import ChatOpenAI # Removed direct import
 from langchain_core.output_parsers import StrOutputParser  # Or JsonOutputParser
 from langchain_core.pydantic_v1 import BaseModel, Field
@@ -10,7 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # from app.models.agent_task import AgentTask
 # from app.services.database import SessionLocal
-from app.agents.constants import AgentTaskStatus
+# Use the constant for retry limit
+from app.agents.constants import DEFAULT_RETRY_LIMIT, AgentTaskStatus
 from app.agents.prompts import (
     format_qualitative_analysis_prompt,
 )
@@ -46,12 +57,23 @@ class QualitativeAnalysisInput(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
+# Define retry parameters (same as quantitative)
+retry_exceptions = (Exception,)
+stop_conditions = stop_after_attempt(DEFAULT_RETRY_LIMIT + 1)
+wait_conditions = wait_exponential(multiplier=1, min=2, max=30)
 
+@retry(
+    stop=stop_conditions,
+    wait=wait_conditions,
+    retry=retry_if_exception_type(retry_exceptions),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True
+)
 async def _perform_qualitative_analysis(
     input_data: QualitativeAnalysisInput,
 ) -> dict[str, Any]:
     """Performs qualitative analysis using an LLM based on the provided instructions and data.
-    Updates task status via the placeholder _update_task_status function.
+    Updates task status. Includes tenacity retry logic.
     """
     log_props = _get_ql_log_props(input_data)
     db_session = input_data.db
@@ -60,19 +82,19 @@ async def _perform_qualitative_analysis(
     analysis_prompt = input_data.analysis_prompt
     retrieved_data = input_data.retrieved_data
 
+    # --- Status Update: Set to RUNNING (or RETRYING by utils) --- #
     try:
-        await update_agent_task_status(db_session, task_id, AgentTaskStatus.RUNNING)
-        logger.info("Starting qualitative analysis.", extra={"props": log_props})
+        # Assuming util handles RETRYING status based on retry_count if passed
+        current_status = AgentTaskStatus.RUNNING
+        await update_agent_task_status(db_session, task_id, current_status)
+        logger.info("Qualitative analysis attempt starting.", extra={"props": log_props})
     except Exception as update_err:
         logger.error(
-            f"Failed to update status to RUNNING: {update_err}",
+            f"Failed to update status before processing: {update_err}",
             extra={"props": log_props},
         )
-        return {
-            "status": "error",
-            "error_message": f"DB Error setting status: {update_err}",
-            "task_id": task_id,
-        }
+        raise RuntimeError(f"DB Error setting status: {update_err}") from update_err
+    # --- End Status Update --- #
 
     try:
         logger.info(
@@ -81,7 +103,8 @@ async def _perform_qualitative_analysis(
         )
 
         # Get LLM Client using helper
-        ql_llm = aget_llm_client(db=db_session, user_id=user_id, model_type="tool")
+        # Changed model_type to "creative" as qualitative might benefit
+        ql_llm = await aget_llm_client(db=db_session, user_id=user_id, model_type="creative")
 
         # Format the prompt
         prompt = format_qualitative_analysis_prompt(
@@ -113,29 +136,14 @@ async def _perform_qualitative_analysis(
         }
 
     except Exception as e:
-        logger.exception(
-            "Error during qualitative analysis",
+        # Log warning for the failed attempt
+        logger.warning(
+            f"Error during qualitative analysis attempt: {e}",
             exc_info=True,
             extra={"props": log_props},
         )
-        error_message = str(e)
-        try:
-            await update_agent_task_status(
-                db_session,
-                task_id,
-                AgentTaskStatus.FAILED,
-                error_message=error_message,
-            )
-        except Exception as final_update_err:
-            logger.error(
-                f"Failed to update status to FAILED after error: {final_update_err}",
-                extra={"props": log_props},
-            )
-        return {
-            "status": "error",
-            "error_message": error_message,
-            "task_id": task_id,
-        }
+        # Let tenacity handle retry/reraise - final FAILED status by worker callback
+        raise e
 
 
 # Instantiate the runnable for this department

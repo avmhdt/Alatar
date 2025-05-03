@@ -1,14 +1,18 @@
 import logging
 import uuid
-
-from sqlalchemy.orm import Session
+import strawberry
 from strawberry.types import Info
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 # Assuming User model and Pydantic schemas exist
 from app import schemas
 from app.auth.dependencies import (
     get_current_user_from_info,
     get_current_user_id,
+    get_current_user_id_from_info,
+    get_required_user_id_from_info,
+    get_current_user_id_context,
 )
 
 # Helper to get user ID from context/token
@@ -21,6 +25,7 @@ from app.graphql.types import (
     UserPreferences,
     UserPreferencesPayload,
     UserPreferencesUpdateInput,
+    InputValidationError,
 )
 from app.graphql.types.common import ShopifyStore
 from app.graphql.types.user import User as UserGQL
@@ -28,6 +33,11 @@ from app.models import User as UserModel
 
 # Assume a Shopify service exists
 from app.services.shopify_service import fetch_store_details  # Hypothetical service
+
+from app import crud # Use CRUD
+
+# Import schema for update input type
+from app.schemas.user_preferences import UserPreferencesUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -44,127 +54,46 @@ def get_linked_account_service():  # Placeholder
     return LinkedAccountService()
 
 
+# --- me Query --- #
 async def get_current_user_info(info: Info) -> UserGQL | None:
-    """Resolver for the 'me' query."""
-    current_user: UserModel | None = await get_current_user_from_info(info)
-    if not current_user:
+    """Resolver to fetch the currently authenticated user's information."""
+    user_id = get_current_user_id_context()
+    if not user_id:
         return None
 
-    # Prepare basic GQL data
-    user_gql_data = {
-        "db_id": current_user.id,
-        "email": current_user.email,
-        "first_name": current_user.first_name,
-        "last_name": current_user.last_name,
-        "is_active": current_user.is_active,
-        "linked_accounts": current_user.linked_accounts,
-        "preferences": current_user.preferences,
-        "shopify_store": None,  # Default to None
-    }
-
-    # Attempt to fetch Shopify Store information if a Shopify account is linked
-    shopify_account = next(
-        (
-            acc
-            for acc in current_user.linked_accounts
-            if acc.provider == "shopify" and acc.is_active
-        ),
-        None,
-    )
-    if shopify_account:
-        try:
-            logger.debug(
-                f"Found active Shopify account for user {current_user.id}. Fetching store details for {shopify_account.account_id}"
-            )
-            # --- Call Shopify API --- #
-            # Ensure shopify_account has necessary fields (access_token, account_id which is shop_domain)
-            if shopify_account.access_token and shopify_account.account_id:
-                shop_info_from_api = await fetch_store_details(
-                    access_token=shopify_account.access_token,
-                    shop_domain=shopify_account.account_id,
-                )
-            else:
-                logger.warning(
-                    f"Shopify linked account {shopify_account.id} is missing access token or shop domain."
-                )
-                shop_info_from_api = None
-            # ----------------------- #
-
-            if shop_info_from_api:
-                # Map API result to ShopifyStore GQL type
-                # Assuming fetch_store_details returns a dict with keys like:
-                # 'name', 'shopDomain', 'currencyCode', 'planDisplayName'
-                # The store's actual Shopify GID might be useful if making ShopifyStore a Node later.
-
-                # Use the linked account's global ID as the GQL ShopifyStore ID for consistency?
-                # Or define a new node type ShopifyStore? Let's use linked account ID for now.
-                store_gql_id = to_global_id("LinkedAccount", shopify_account.id)
-
-                user_gql_data["shopify_store"] = ShopifyStore(
-                    id=store_gql_id,  # Use LinkedAccount's global ID
-                    domain=shop_info_from_api.get(
-                        "shopDomain", shopify_account.account_id
-                    ),
-                    name=shop_info_from_api.get("name"),
-                    currency_code=shop_info_from_api.get("currencyCode"),
-                    plan_display_name=shop_info_from_api.get("planDisplayName"),
-                )
-                logger.info(
-                    f"Successfully fetched Shopify store info ({shop_info_from_api.get('name')}) for user {current_user.id}"
-                )
-            else:
-                logger.warning(
-                    f"Did not receive store details from Shopify API for user {current_user.id}, shop {shopify_account.account_id}"
-                )
-
-        except Exception as e:
-            logger.error(
-                f"Failed to fetch/map Shopify store info for user {current_user.id}: {e}",
-                exc_info=True,
-            )
-            # Keep shopify_store as None if API call fails
-
-    # Create the GQL User object
-    # Strawberry handles ID resolution via @strawberry.field
-    return UserGQL(**user_gql_data)
+    db: AsyncSession = info.context.db
+    # Use async CRUD function
+    user_db = await crud.aget_user(db, user_id=user_id)
+    if user_db:
+        # Strawberry Pydantic type will handle conversion
+        return UserGQL.from_orm(user_db)
+    return None
 
 
 async def update_user_preferences(
-    info: Info, input: UserPreferencesUpdateInput
+    info: Info,
+    input: UserPreferencesUpdateInput
 ) -> UserPreferencesPayload:
-    """Resolver for the 'updatePreferences' mutation."""
-    db: Session = info.context["db"]
-    user_id: uuid.UUID | None = get_current_user_id(info.context.get("request"))
-
+    """Resolver to update user preferences."""
+    user_id = get_current_user_id_context()
     if not user_id:
-        return UserPreferencesPayload(
-            userErrors=[UserError(message="Authentication required.")]
-        )
+        return UserPreferencesPayload(userErrors=[UserError(message="Authentication required.")])
 
-    user_service = get_user_service()
+    db: AsyncSession = info.context.db
+
     try:
-        updated_prefs_model = await user_service.update_preferences(
-            db,
-            user_id,
-            schemas.PreferencesUpdate(
-                preferred_llm=input.preferred_llm,
-                notifications_enabled=input.notifications_enabled,
-            ),
+        # Use async CRUD function
+        updated_prefs_db = await crud.create_or_update_user_preferences_async(
+            db, user_id=user_id, obj_in=input.to_pydantic()
         )
-        # Map result back to GQL type
-        updated_prefs_gql = UserPreferences(
-            preferred_llm=updated_prefs_model.preferred_llm,
-            notifications_enabled=updated_prefs_model.notifications_enabled,
-        )
-        return UserPreferencesPayload(preferences=updated_prefs_gql)
+        if updated_prefs_db:
+            # Convert to GQL type
+            updated_prefs_gql = UserPreferences.from_orm(updated_prefs_db)
+            return UserPreferencesPayload(preferences=updated_prefs_gql)
+        else:
+            # Handle case where CRUD might fail (though it should raise exceptions)
+            return UserPreferencesPayload(userErrors=[UserError(message="Failed to update preferences.")])
 
-    except NotFoundError as e:
-        return UserPreferencesPayload(userErrors=[UserError(message=str(e))])
     except Exception as e:
-        # Log the exception
-        logger.error(
-            f"Error updating preferences for user {user_id}: {e}", exc_info=True
-        )
-        return UserPreferencesPayload(
-            userErrors=[UserError(message="An unexpected error occurred.")]
-        )
+        # Log the exception e
+        return UserPreferencesPayload(userErrors=[UserError(message=f"An error occurred: {e}")])

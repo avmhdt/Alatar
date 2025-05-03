@@ -241,7 +241,7 @@ class Query:
     ) -> AnalysisRequestConnection:
         """List analysis requests for the current user."""
         log_props = {"limit": first, "after_cursor": after}
-        print(f"Resolver 'listAnalysisRequests' called (first={first}, after={after})")
+        logger.info(f"Resolver 'listAnalysisRequests' called (first={first}, after={after})")
         db: Session = info.context["db"]
         edges: list[Edge[AnalysisRequest]] = []
         page_info = PageInfo(has_next_page=False, has_previous_page=False)  # Defaults
@@ -305,7 +305,7 @@ class Query:
     ) -> ProposedActionConnection:
         """List proposed actions for the current user."""
         log_props = {"limit": first, "after_cursor": after}
-        print(f"Resolver 'listProposedActions' called (first={first}, after={after})")
+        logger.info(f"Resolver 'listProposedActions' called (first={first}, after={after})")
         db: Session = info.context["db"]
         edges: list[Edge[ProposedAction]] = []
         page_info = PageInfo(has_next_page=False, has_previous_page=False)
@@ -428,7 +428,7 @@ class Mutation:
 
             return AuthPayload(token=access_token, user=strawberry_user)
         except Exception as e:
-            print(f"Error during login token creation: {e}")  # Log error
+            logger.error(f"Error during login token creation: {e}")  # Log error
             user_errors = map_exception_to_user_errors(e)
             return AuthPayload(userErrors=user_errors)
 
@@ -470,7 +470,7 @@ class Mutation:
             return ShopifyOAuthStartPayload(userErrors=[e])
         except ValueError as e:
             # Handle configuration errors from service
-            print(f"ValueError during Shopify OAuth start: {e}")
+            logger.error(f"ValueError during Shopify OAuth start: {e}")
             return ShopifyOAuthStartPayload(
                 userErrors=[
                     InputValidationError(
@@ -479,7 +479,7 @@ class Mutation:
                 ]
             )
         except Exception as e:
-            print(f"Unexpected error during Shopify OAuth start: {e}")  # Log error
+            logger.error(f"Unexpected error during Shopify OAuth start: {e}")  # Log error
             user_errors = map_exception_to_user_errors(e)
             return ShopifyOAuthStartPayload(userErrors=user_errors)
 
@@ -515,9 +515,9 @@ class Mutation:
             if updated:
                 db.commit()
                 db.refresh(prefs)
-                print(f"Updated preferences for user {user_id}")
+                logger.info(f"Updated preferences for user {user_id}")
             else:
-                print(f"No preference fields provided to update for user {user_id}")
+                logger.info(f"No preference fields provided to update for user {user_id}")
 
             pydantic_prefs = schemas.UserPreferences.from_orm(prefs)
             return UserPreferencesPayload(
@@ -528,7 +528,7 @@ class Mutation:
             return UserPreferencesPayload(userErrors=[e])
         except IntegrityError as e:
             db.rollback()
-            print(f"Database integrity error updating preferences: {e}")
+            logger.error(f"Database integrity error updating preferences: {e}")
             return UserPreferencesPayload(
                 userErrors=[
                     InternalServerError(message="Database error saving preferences.")
@@ -536,7 +536,7 @@ class Mutation:
             )
         except Exception as e:
             db.rollback()
-            print(f"Unexpected error updating preferences: {e}")
+            logger.error(f"Unexpected error updating preferences: {e}")
             user_errors = map_exception_to_user_errors(e)
             return UserPreferencesPayload(userErrors=user_errors)
 
@@ -547,7 +547,7 @@ class Mutation:
         self, info: StrawberryInfo, prompt: str
     ) -> SubmitAnalysisRequestPayload:
         """Submit a new analysis request."""
-        print(
+        logger.info(
             f"Mutation 'submitAnalysisRequest' called with prompt: '{prompt[:50]}...'"
         )
         db: Session = info.context["db"]
@@ -556,7 +556,7 @@ class Mutation:
 
         if not queue_client:
             # Log this critical configuration error
-            print("ERROR: QueueClient not found in Strawberry context!")
+            logger.error("ERROR: QueueClient not found in Strawberry context!")
             # Return an error payload
             return SubmitAnalysisRequestPayload(
                 userErrors=[
@@ -593,12 +593,12 @@ class Mutation:
                     await queue_client.publish_message(
                         queue_name=QUEUE_C1_INPUT, message_body=message_body
                     )
-                    print(
+                    logger.info(
                         f"Successfully published task for AnalysisRequest {result.id} to queue {QUEUE_C1_INPUT}"
                     )
                 except Exception as pub_err:
                     # Log the publishing error
-                    print(
+                    logger.error(
                         f"ERROR: Failed to publish task for AnalysisRequest {result.id} to queue {QUEUE_C1_INPUT}: {pub_err}"
                     )
                     # Decide how to handle:
@@ -621,7 +621,7 @@ class Mutation:
                 return SubmitAnalysisRequestPayload(analysis_request=gql_request)
             else:
                 # Should not happen if service signature is correct
-                print(
+                logger.error(
                     f"ERROR: Unexpected return type from submit_new_request service: {type(result)}"
                 )
                 raise Exception(
@@ -631,7 +631,7 @@ class Mutation:
         except (AuthenticationError, AuthorizationError) as e:
             return SubmitAnalysisRequestPayload(userErrors=[e])
         except NotImplementedError:
-            print("submit_new_request service not implemented")
+            logger.error("submit_new_request service not implemented")
             return SubmitAnalysisRequestPayload(
                 userErrors=[
                     InternalServerError(
@@ -640,7 +640,7 @@ class Mutation:
                 ]
             )
         except Exception as e:
-            print(f"Unexpected error in submitAnalysisRequest: {e}")
+            logger.error(f"Unexpected error in submitAnalysisRequest: {e}")
             # Log error
             user_errors = map_exception_to_user_errors(e)
             return SubmitAnalysisRequestPayload(userErrors=user_errors)
@@ -650,7 +650,7 @@ class Mutation:
         self, info: StrawberryInfo, action_id: strawberry.ID
     ) -> ApproveActionPayload:
         """Approve a proposed action."""
-        print(f"Mutation 'userApprovesAction' called with action_id: {action_id}")
+        logger.info(f"Mutation 'userApprovesAction' called with action_id: {action_id}")
         db: Session = info.context["db"]
         try:
             # user_id = await get_current_user_id_from_context(info)
@@ -692,7 +692,7 @@ class Mutation:
                 ]
             )
         except NotImplementedError:
-            print("approve_action service not implemented")
+            logger.error("approve_action service not implemented")
             return ApproveActionPayload(
                 userErrors=[
                     InternalServerError(
@@ -701,7 +701,7 @@ class Mutation:
                 ]
             )
         except Exception as e:
-            print(f"Unexpected error in userApprovesAction: {e}")
+            logger.error(f"Unexpected error in userApprovesAction: {e}")
             user_errors = map_exception_to_user_errors(e)
             return ApproveActionPayload(userErrors=user_errors)
 
@@ -710,7 +710,7 @@ class Mutation:
         self, info: StrawberryInfo, action_id: strawberry.ID
     ) -> RejectActionPayload:
         """Reject a proposed action."""
-        print(f"Mutation 'userRejectsAction' called with action_id: {action_id}")
+        logger.info(f"Mutation 'userRejectsAction' called with action_id: {action_id}")
         db: Session = info.context["db"]
         try:
             # user_id = await get_current_user_id_from_context(info)
@@ -750,7 +750,7 @@ class Mutation:
                 ]
             )
         except NotImplementedError:
-            print("reject_action service not implemented")
+            logger.error("reject_action service not implemented")
             return RejectActionPayload(
                 userErrors=[
                     InternalServerError(
@@ -759,7 +759,7 @@ class Mutation:
                 ]
             )
         except Exception as e:
-            print(f"Unexpected error in userRejectsAction: {e}")
+            logger.error(f"Unexpected error in userRejectsAction: {e}")
             user_errors = map_exception_to_user_errors(e)
             return RejectActionPayload(userErrors=user_errors)
 
@@ -771,7 +771,7 @@ class Subscription:
         self, info: StrawberryInfo, request_id: strawberry.ID
     ) -> AsyncGenerator[AnalysisRequest, None]:
         """Subscribe to updates for a specific analysis request."""
-        print(
+        logger.info(
             f"Subscription 'analysisRequestUpdates' requested for request_id: {request_id}"
         )
         db: Session = info.context["db"]
@@ -788,7 +788,7 @@ class Subscription:
                 # Important: Don't reveal if the ID exists but belongs to another user.
                 # Raise an error or simply yield nothing / close the generator.
                 # Raising might be better to signal the issue to the client immediately.
-                print(
+                logger.error(
                     f"Auth Error: User {user_id} cannot subscribe to request {request_uuid}"
                 )
                 # Option 1: Raise Auth error (might disconnect client)
@@ -801,7 +801,7 @@ class Subscription:
                 return
 
             # 2. Subscribe using the pubsub service
-            print(f"User {user_id} subscribing to updates for {request_uuid}")
+            logger.info(f"User {user_id} subscribing to updates for {request_uuid}")
             async for message_data in pubsub_service.subscribe_to_analysis_request(
                 request_uuid
             ):
@@ -813,7 +813,7 @@ class Subscription:
                     yield gql_update
                 except Exception as e:
                     # Log mapping errors but keep the subscription alive if possible
-                    print(
+                    logger.error(
                         f"Error mapping pubsub message to GQL type: {e} - Data: {message_data}"
                     )
                     continue  # Skip this message
@@ -821,32 +821,32 @@ class Subscription:
         except (AuthenticationError, AuthorizationError, InputValidationError) as e:
             # Handle errors during initial auth/validation
             # Log and end the generator gracefully
-            print(f"Subscription setup error for request {request_id}: {e.message}")
+            logger.error(f"Subscription setup error for request {request_id}: {e.message}")
             # Depending on client library, might need to yield an error or just return
             # yield SomeErrorType(...) # If schema supports
             return
         except ValueError:  # Handle invalid UUID format for request_id
-            print(f"Subscription error: Invalid request ID format '{request_id}'")
+            logger.error(f"Subscription error: Invalid request ID format '{request_id}'")
             # yield InputValidationError(...) # If schema supports
             return
         except NotImplementedError as e:
-            print(f"Subscription setup error: Service not implemented ({e})")
+            logger.error(f"Subscription setup error: Service not implemented ({e})")
             # yield InternalServerError(...) # If schema supports
             return
         except asyncio.CancelledError:
-            print(f"Subscription cancelled by client for request {request_id}")
+            logger.error(f"Subscription cancelled by client for request {request_id}")
             # Let the cancellation propagate
             raise
         except Exception as e:
             # Log unexpected errors during subscription setup or stream
-            print(
+            logger.error(
                 f"Unexpected error in analysisRequestUpdates subscription for {request_id}: {e}"
             )
             # Depending on severity, might yield an error or just return
             # yield InternalServerError(...) # If schema supports
             return
         finally:
-            print(f"Subscription ended for request {request_id}")
+            logger.info(f"Subscription ended for request {request_id}")
 
         # Placeholder implementation (remove after implementing above)
         # print(f"Subscription 'analysisRequestUpdates' requested (placeholder) for request_id: {request_id}")
