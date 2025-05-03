@@ -6,3 +6,13 @@ from app.database import create_db_and_tables, close_db_connections, get_session
 from app.core import settings
 
 # ... existing code ... 
+
+__all__ = [
+    "UserSchema",
+    "UserCreate",
+    "UserUpdate",
+    # Core
+    "settings",
+    "AgentTask",
+    # Auth
+] 

@@ -1,20 +1,20 @@
 from app.crud.base import CRUDBase
 from app.crud.analysis_request import analysis_request
 from app.crud.crud_user import (
-    create_user,
+    add_user,
     get_user,
     get_user_by_email,
     aget_user,
     aget_user_by_email,
 )
 from app.crud.crud_linked_account import (
-    create_or_update_shopify_account,
     get_decrypted_token_for_shopify_account,
     get_linked_account_by_user_and_shop,
     get_linked_account,
     aget_linked_account,
     aget_linked_account_by_user_and_shop,
     aget_decrypted_token_for_shopify_account,
+    asave_shopify_account,
     get_first_shopify_account_for_user,
 )
 from app.crud.crud_user_preferences import (
@@ -38,14 +38,16 @@ from app.crud.crud_proposed_action import (
     get_multi_proposed_actions_by_user,
     get_proposed_action,
     update_proposed_action_status,
+    acreate_proposed_action,
+    aget_proposed_action,
+    aupdate_proposed_action_status,
 )
-# from .crud_cached_shopify_data import cached_shopify_data
 
 
 __all__ = [
     "CRUDBase",
     "analysis_request",
-    "create_user",
+    "add_user",
     "get_user",
     "get_user_by_email",
     "create_or_update_shopify_account",
@@ -63,7 +65,7 @@ __all__ = [
     # LinkedAccount Async
     "aget_linked_account",
     "aget_linked_account_by_user_and_shop",
-    "acreate_or_update_shopify_account",
+    "asave_shopify_account",
     "aget_decrypted_token_for_shopify_account",
     "get_first_shopify_account_for_user",
     # AgentTask
