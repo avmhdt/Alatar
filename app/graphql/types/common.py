@@ -3,19 +3,24 @@ import uuid
 import datetime
 
 import strawberry
+from strawberry.schema_directive import Location
 # from strawberry.types import Node # Removed old import
-from strawberry.relay import Node
-from app.graphql.relay import to_global_id # Corrected import for Relay
+from app.graphql.common import Node, to_global_id # Use local Node interface definition
 
 # Import base UserError if needed for payloads, or define payloads elsewhere
 # from .user_error import UserError
+
+# Define a schema directive to hide fields from the GraphQL schema
+@strawberry.schema_directive(locations=[Location.FIELD_DEFINITION])
+class Skip:
+    if_: bool = True
 
 
 # Corresponds to DB model LinkedAccount
 @strawberry.type
 class LinkedAccount(Node):
     """Represents an external account linked by the user (e.g., Shopify store)."""
-    db_id: uuid.UUID = strawberry.field(directives=[strawberry.directive.Include(if_=False)])
+    db_id: uuid.UUID = strawberry.field(directives=[Skip(if_=True)])
 
     @strawberry.field
     def id(self) -> strawberry.ID:
@@ -60,7 +65,7 @@ class VisualizationType(Enum):
 @strawberry.type
 class Visualization:
     type: VisualizationType
-    data: strawberry.JSON  # Data formatted for the specific visualization type
+    data: strawberry.scalars.JSON  # Data formatted for the specific visualization type
     title: str | None = None
 
 
@@ -69,21 +74,6 @@ class AnalysisResult:
     summary: str | None = None
     visualizations: list[Visualization] | None = None
     # rawData: Optional[strawberry.JSON] = None # Include if raw data is needed
-
-
-@strawberry.type
-class ShopifyStore:  # New Type
-    """Represents information about a connected Shopify store."""
-
-    # This will likely require fetching data via Shopify API
-    # based on the user's LinkedAccount
-    id: strawberry.ID  # Use global ID if store is a node itself?
-    domain: str
-    name: str | None = None  # e.g., shop.name
-    currency_code: str | None = None  # e.g., shop.currency
-    plan_display_name: str | None = None  # e.g., shop.plan_display_name
-    # Add other relevant fields from Shopify Shop object
-    # https://shopify.dev/docs/api/admin-graphql/latest/objects/Shop
 
 
 # --- Payloads for Queries/Mutations using these types ---
@@ -150,14 +140,6 @@ NodeType = TypeVar("NodeType")
 
 
 @strawberry.type
-class PageInfo:
-    has_next_page: bool
-    has_previous_page: bool  # Cursors are opaque, so previous might be hard/unreliable
-    start_cursor: str | None = None
-    end_cursor: str | None = None
-
-
-@strawberry.type
 class Edge(Generic[NodeType]):
     node: NodeType
     cursor: str
@@ -165,8 +147,30 @@ class Edge(Generic[NodeType]):
 
 @strawberry.type
 class Connection(Generic[NodeType]):
-    page_info: PageInfo
+    """Relay-style connection for pagination."""
     edges: list[Edge[NodeType]]
+    pageInfo: "PageInfo" = strawberry.field(
+        description="Information to aid in pagination."
+    )
+
+
+@strawberry.type
+class PageInfo:
+    """Information about pagination in a connection."""
+    hasNextPage: bool = strawberry.field(
+        description="When paginating forwards, indicates if more items exist."
+    )
+    hasPreviousPage: bool = strawberry.field(
+        description="When paginating backwards, indicates if more items exist."
+    )
+    startCursor: str | None = strawberry.field(
+        description="The cursor to continue when paginating backwards.",
+        default=None,
+    )
+    endCursor: str | None = strawberry.field(
+        description="The cursor to continue when paginating forwards.",
+        default=None,
+    )
 
 
 # --- Base Error/Payload Types ---
@@ -176,15 +180,6 @@ class Connection(Generic[NodeType]):
 class UserError:
     message: str
     field: str | None = None  # Optional field indicating the source of the error
-
-
-@strawberry.enum
-class VisualizationType(enum.Enum):
-    """Placeholder for visualization types."""
-
-    TABLE = "TABLE"
-    BAR_CHART = "BAR_CHART"
-    LINE_CHART = "LINE_CHART"
 
 
 # Placeholder for future types (e.g., AnalysisRequest, ProposedAction, etc.)
@@ -372,7 +367,7 @@ class RejectActionPayload(BasePayload):
 
 
 # Auth inputs
-@strawberry.experimental.pydantic.input(model=UserCreateSchema)
+@strawberry.experimental.pydantic.input(model=UserCreateSchema, all_fields=True)
 class UserRegisterInput:
     pass
 

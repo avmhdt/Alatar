@@ -34,34 +34,14 @@ from app.services.queue_client import QUEUE_C1_INPUT, QueueClient  # Added Queue
 
 from app.graphql.errors import map_exception_to_user_errors  # For handling unexpected errors
 
-# Import types and inputs from types.py
-from app.graphql.types import (
-    AnalysisRequest,  # Added GQL Type
-    AnalysisRequestConnection,  # Added Connection Type
-    ApproveActionPayload,  # Added Payload
-    AuthenticationError,
-    AuthorizationError,
-    AuthPayload,
-    Edge,  # Added
-    InputValidationError,
-    InternalServerError,
-    NotFoundError,
-    PageInfo,  # Added
-    ProposedAction,  # Added GQL Type
-    ProposedActionConnection,  # Added Connection Type
-    RegisterPayload,
-    RejectActionPayload,  # Added Payload
-    ShopifyOAuthStartPayload,
-    StartShopifyOAuthInput,
-    SubmitAnalysisRequestPayload,  # Added Payload
-    User,
-    UserLoginInput,
-    UserPreferences,
-    UserPreferencesPayload,  # Added Preferences types
-    UserPreferencesUpdateInput,
-    UserRegisterInput,
-    encode_cursor,  # Added encode_cursor utility
-)
+from app.graphql.types.user_error import *
+from app.graphql.types.user import *
+from app.graphql.types.analysis_request import *
+from app.graphql.types.proposed_action import *
+from app.graphql.types.common import *
+from app.graphql.types.auth import *
+from app.graphql.types.shopify import *
+
 
 logger = logging.getLogger(__name__)  # Added logger
 

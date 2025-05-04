@@ -9,7 +9,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.graphql.types import decode_cursor
+from app.graphql.utils import decode_cursor
 from app.models.proposed_action import ProposedAction, ProposedActionStatus
 
 # Import other necessary models if needed

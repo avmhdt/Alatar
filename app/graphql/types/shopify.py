@@ -1,6 +1,6 @@
 import strawberry
 
-from app.graphql.relay import Node  # Assuming Node interface is defined here
+from app.graphql.common import Node  # Assuming Node interface is defined here
 
 
 @strawberry.type

@@ -18,8 +18,8 @@ from app import crud
 
 # Import cursor utils and Node type
 # Import relay helpers for global ID decoding
-from app.graphql.relay import from_global_id, to_global_id
-from app.graphql.types import UserError
+from app.graphql.common import from_global_id, to_global_id
+from app.graphql.types.user_error import UserError
 
 # Import GQL types (will be defined in types/analysis_request.py)
 from app.graphql.types.analysis_request import (
@@ -311,3 +311,16 @@ async def list_analysis_requests(
 
 
 # Add analysisRequest and listAnalysisRequests query resolvers here...
+
+# Helper function for subscription resolver
+async def get_analysis_request_by_uuid(
+    db: Session, request_uuid: uuid.UUID
+) -> AnalysisRequestModel | None:
+    """Helper function to get an analysis request by UUID directly for subscription access checking."""
+    try:
+        # Use the CRUD object to get the request
+        request_db = await crud.analysis_request.aget(db=db, id=request_uuid)
+        return request_db
+    except Exception as e:
+        logger.error(f"Error fetching analysis request {request_uuid}: {e}")
+        return None

@@ -51,10 +51,10 @@ EXPOSE 8000
 
 # Add a basic healthcheck (adjust path and interval as needed)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8000/_health || exit 1
+  CMD curl -f http://localhost:8000/health || exit 1
 
 # Command to run the application using uvicorn
 # Use multiple workers in production, e.g., based on CPU cores
 # Ensure the number of workers is appropriate for your server resources
 # Example: Using 2 workers
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -8,26 +8,28 @@ from sqlalchemy.future import select
 # Assuming User model and Pydantic schemas exist
 from app import schemas
 from app.auth.dependencies import (
-    get_current_user_from_info,
-    get_current_user_id,
-    get_current_user_id_from_info,
-    get_required_user_id_from_info,
+    get_current_user_optional,
+    get_current_user_required,
+    get_optional_user_id_from_token,
+    get_required_user_id,
     get_current_user_id_context,
 )
 
 # Helper to get user ID from context/token
 from app.core.exceptions import NotFoundError
-from app.graphql.relay import to_global_id
+from app.graphql.common import to_global_id
 
-# Import GraphQL types
-from app.graphql.types import (
-    UserError,
-    UserPreferences,
-    UserPreferencesPayload,
-    UserPreferencesUpdateInput,
-    InputValidationError,
-)
-from app.graphql.types.common import ShopifyStore
+from app.graphql.types.user_error import *
+from app.graphql.types.user import *
+from app.graphql.types.analysis_request import *
+from app.graphql.types.proposed_action import *
+from app.graphql.types.common import *
+from app.graphql.types.auth import *
+from app.graphql.types.shopify import *
+
+# Import specific types for type hints
+from app.graphql.types.common import UserPreferences
+from app.graphql.types.shopify import ShopifyStore
 from app.graphql.types.user import User as UserGQL
 from app.models import User as UserModel
 

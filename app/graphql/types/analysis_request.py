@@ -1,18 +1,18 @@
 import datetime
 import uuid
-from typing import NewType
+from typing import NewType, Any, Generic, TypeVar, Optional
+from enum import Enum
+from typing import List
 
 import strawberry
-from strawberry.relay import Connection, Node
-
-# Use NewType for cursor clarity
-ConnectionCursor = NewType("ConnectionCursor", str)
+from strawberry.relay import Connection
+from app.graphql.common import Node, to_global_id, ConnectionCursor
 
 # Import related types
 # Pydantic Schema (if used for input validation)
 # from app import schemas
 # Import Node interface and global ID helpers
-from app.graphql.relay import to_global_id
+from app.graphql.types.common import Skip  # Import the Skip directive
 
 from .common import AnalysisResult, AnalysisRequestStatus as AnalysisStatus
 from .proposed_action import ProposedAction
@@ -26,7 +26,7 @@ class AnalysisRequest(Node):
     # Keep original db_id for internal use if needed, but expose global ID
     db_id: uuid.UUID = strawberry.field(
         description="Internal database ID",
-        directives=[strawberry.directive.Include(if_=False)],
+        directives=[Skip(if_=True)],
     )  # Hide internal ID
 
     # Implement Node interface id field

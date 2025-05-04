@@ -1,10 +1,12 @@
 import datetime
 import uuid
-from typing import Any, Generic, TypeVar, Optional
+from typing import Any, Generic, TypeVar, Optional, NewType
 
 import strawberry
+from strawberry.relay import Connection
 
-from app.graphql.relay import Node, to_global_id
+from app.graphql.common import Node, to_global_id, ConnectionCursor
+from app.graphql.types.common import Skip  # Import the Skip directive
 
 # Import Enum
 from app.graphql.types.user_error import UserError  # Assuming UserError exists
@@ -24,7 +26,7 @@ class ProposedAction(Node):
 
     db_id: uuid.UUID = strawberry.field(
         description="Internal database ID",
-        directives=[strawberry.directive.Include(if_=False)],
+        directives=[Skip(if_=True)],
     )
 
     @strawberry.field
@@ -37,7 +39,7 @@ class ProposedAction(Node):
     linked_account_id: strawberry.ID
     action_type: str
     description: str
-    parameters: Optional[dict[str, Any]]  # Representing JSONB - Corrected Optional type
+    parameters: strawberry.scalars.JSON | None = None  # Use JSON scalar for dictionary
     status: ProposedActionStatusEnum  # Use original Enum type
     execution_logs: str | None
     created_at: datetime.datetime
@@ -45,8 +47,8 @@ class ProposedAction(Node):
     approved_at: datetime.datetime | None
     executed_at: datetime.datetime | None
     tool_name: str
-    tool_input: strawberry.JSON
-    result: strawberry.JSON | None = None
+    tool_input: strawberry.scalars.JSON
+    result: strawberry.scalars.JSON | None = None
     error_message: str | None = None
 
 
@@ -94,15 +96,14 @@ class UserRejectActionPayload(BasePayload[ProposedAction]):
 
 
 # --- Connection Type for Pagination (if needed for listProposedActions) ---
-# Add Edge and Connection types if implementing Relay-style pagination
 @strawberry.type
 class ProposedActionEdge:
     """Represents an edge in the ProposedAction connection."""
 
     node: ProposedAction
-    cursor: strawberry.relay.ConnectionCursor
+    cursor: ConnectionCursor
 
 
 @strawberry.type
-class ProposedActionConnection(strawberry.relay.Connection[ProposedActionEdge]):
+class ProposedActionConnection(Connection[ProposedActionEdge]):
     """Relay-style connection for paginating ProposedActions."""

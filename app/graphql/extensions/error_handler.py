@@ -1,8 +1,7 @@
 import logging
 from typing import Any
 
-from graphql.errors import GraphQLError
-from graphql.errors import format_graphql_error
+from graphql import GraphQLError
 from strawberry.extensions import Extension
 
 logger = logging.getLogger(__name__)
@@ -110,9 +109,5 @@ class CustomErrorHandler(Extension):
     def format(self) -> dict[str, Any]:
         """Formats the final GraphQL response including errors."""
         response = super().format()  # Get the default Strawberry formatting
-        if response.get("errors"):
-            # Apply standard GraphQL error formatting to our processed errors
-            response["errors"] = [
-                format_graphql_error(error) for error in response["errors"]
-            ]
+        # Let Strawberry handle the error formatting
         return response

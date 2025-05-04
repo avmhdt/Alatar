@@ -9,16 +9,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from strawberry.types import Info
 
-from app.graphql.types import (
-    ProposedAction,
-    ProposedActionConnection,
-    ProposedActionEdge,
-    UserApproveActionInput,
-    UserApproveActionPayload,
-    UserError,
-    UserRejectActionInput,
-    UserRejectActionPayload,
-)
+from app.graphql.types.user_error import *
+from app.graphql.types.analysis_request import *
+from app.graphql.types.proposed_action import *
+from app.graphql.types.common import *
+from app.graphql.types.auth import *
+from app.graphql.types.shopify import *
+from app.graphql.types.user import *
+from app.graphql.types.proposed_action import ConnectionCursor  # Import the ConnectionCursor NewType
 
 # Import the executor service
 from app.graphql.utils import (
@@ -44,7 +42,7 @@ from app.graphql.types.analysis_request import PageInfo
 from app.services.action_service import approve_action, reject_action, list_pending_actions
 
 # Import the relay helpers
-from app.graphql.relay import from_global_id, to_global_id
+from app.graphql.common import from_global_id, to_global_id
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +69,7 @@ def map_action_model_to_gql(action: ProposedActionModel) -> ProposedAction:
 async def list_proposed_actions(
     info: Info,
     first: int = 10,
-    after: strawberry.relay.ConnectionCursor | None = None,
+    after: ConnectionCursor | None = None,
 ) -> ProposedActionConnection:
     """Resolver to list pending proposed actions for the current user."""
     user_id = get_current_user_id_context()

@@ -8,7 +8,6 @@ from collections.abc import AsyncGenerator
 from redis import asyncio as aioredis
 import strawberry
 from sqlalchemy.orm import Session
-from strawberry.channels import PubSub
 from strawberry.types import Info
 
 from app.core.redis_client import get_analysis_update_channel, get_redis_connection
@@ -22,9 +21,8 @@ from ..types.analysis_request import AnalysisRequest as AnalysisRequestGQL
 logger = logging.getLogger(__name__)
 
 # --- PubSub Initialization ---
-# Use strawberry.channels.PubSub for in-memory pub/sub
-# For production, replace with RedisPubSub or similar
-pubsub = PubSub()
+# Use a simple in-memory approach instead of the unavailable PubSub class
+# pubsub = PubSub()  # Remove this line
 
 # --- In-memory Pub/Sub (Replace with Redis/Broker for production) ---
 # Simple dictionary to hold subscribers for different request IDs
@@ -86,7 +84,7 @@ async def analysis_request_updates(
     # Fetch the request to ensure it exists and the user has access
     # Note: This fetch might happen *before* the subscription starts listening,
     # so it confirms initial access rights.
-    initial_request = get_analysis_request_by_uuid(db, request_uuid)
+    initial_request = await get_analysis_request_by_uuid(db, request_uuid)
     if not initial_request:
         logger.warning(
             f"Subscription attempt denied or request not found for ID: {request_uuid}"

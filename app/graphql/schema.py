@@ -39,13 +39,15 @@ from app.graphql.types.proposed_action import (
     UserApproveActionPayload,
     UserRejectActionInput,
     UserRejectActionPayload,
+    ConnectionCursor,  # Import the ConnectionCursor NewType
 )
 
 # Import the custom error handler extension
 from .extensions.error_handler import CustomErrorHandler  # Updated import path
 
 # Import Node interface and resolver
-from .relay import Node, get_node
+from .common import Node
+from .relay import get_node # Only import get_node from relay
 
 # Import subscription resolver
 from .resolvers.subscription import (
@@ -63,8 +65,8 @@ from .types import UserPreferences, UserPreferencesPayload, UserPreferencesUpdat
 # Import auth types and resolver
 from .types.auth import (
     AuthPayload,  # Keep if needed
-    CompleteShopifyOAuthInput,
-    CompleteShopifyOAuthPayload,
+    # CompleteShopifyOAuthInput,  # Commented out - not defined in auth.py
+    # CompleteShopifyOAuthPayload,  # Commented out - not defined in auth.py
     RegisterPayload,  # Keep if needed
     ShopifyOAuthStartPayload,  # Keep if needed
 )
@@ -108,8 +110,17 @@ class Context(BaseContext):
 
     async def get_context(self) -> AsyncGenerator["Context", None]:
         user_id: uuid.UUID | None = None
-        if self.request:
+        
+        # Add logging to debug context creation
+        logger.debug("Creating GraphQL context")
+        
+        # Check if we have a request
+        if hasattr(self, 'request') and self.request:
+            logger.debug(f"Request found: {self.request}")
             user_id = get_optional_user_id_from_token(self.request)
+            logger.debug(f"User ID from token: {user_id}")
+        else:
+            logger.debug("No request object found")
 
         if user_id:
             # Use the new context manager that handles session and RLS
@@ -119,6 +130,7 @@ class Context(BaseContext):
         else:
             # No user ID, provide a regular session without RLS
             # This might be needed for public queries/mutations
+            logger.debug("Using session without RLS")
             async with get_async_db() as session: # Use simplified get_async_db
                 self.db = session
                 yield self
@@ -151,7 +163,7 @@ class ShopifyOAuthStartPayload:
 
 
 # --- Input Types ---
-@strawberry.experimental.pydantic.input(model=UserCreateSchema)
+@strawberry.experimental.pydantic.input(model=UserCreateSchema, all_fields=True)
 class UserRegisterInput:
     pass
 
@@ -202,7 +214,7 @@ class Query:
         self,
         info: StrawberryInfo,
         first: int = 10,
-        after: strawberry.relay.ConnectionCursor | None = None,
+        after: ConnectionCursor | None = None,
     ) -> ProposedActionConnection:
         """List pending proposed actions for the current user."""
         # Actual call is delegated to the imported function
@@ -341,8 +353,6 @@ schema = strawberry.Schema(
         LinkedAccount,
         # Include other GQL types used explicitly or implicitly if needed
     ],
-    # Enable Relay support
-    enable_federation_v2=False,  # Assuming not using federation
     # Add extensions if needed (e.g., for performance monitoring)
     extensions=[
         CustomErrorHandler,  # Add our custom error handler

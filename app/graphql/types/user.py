@@ -1,13 +1,17 @@
 import uuid
+from datetime import datetime
+from typing import List, Optional
 
 import strawberry
+from strawberry.schema_directive import Location
 
 # Import Node interface and global ID helpers
-from app.graphql.relay import Node, to_global_id
+from app.graphql.common import Node, to_global_id
 
 # Import base types and UserError
-from .common import LinkedAccount, ShopifyStore, UserPreferences
+from .common import LinkedAccount, UserPreferences, Skip
 from .user_error import UserError
+from .shopify import ShopifyStore
 
 
 # --- Input Types ---
@@ -31,7 +35,7 @@ class User(Node):
     # Keep original db_id for internal use if needed, but expose global ID
     db_id: uuid.UUID = strawberry.field(
         description="Internal database ID",
-        directives=[strawberry.directive.Include(if_=False)],
+        directives=[Skip(if_=True)],
     )  # Hide internal ID
 
     # Implement Node interface id field

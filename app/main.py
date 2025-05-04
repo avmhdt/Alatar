@@ -2,7 +2,8 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Body
+from fastapi.responses import RedirectResponse, JSONResponse
 
 # OpenTelemetry Imports (Basic Setup)
 from opentelemetry import trace
@@ -123,32 +124,149 @@ app.add_middleware(
     secret_key=settings.APP_SECRET_KEY,  # Use the key from settings
     https_only=True, # Recommended for production if served over HTTPS
     same_site="lax", # Helps prevent CSRF
-    # max_age=14 * 24 * 60 * 60 # Optional: Session cookie lifetime (e.g., 14 days)
+    max_age=14 * 24 * 60 * 60 # Optional: Session cookie lifetime (e.g., 14 days)
 )
 
 # --- GraphQL Setup ---
-# Apply rate limit to the GraphQL router instance directly
-# Note: This applies the limit based on IP per connection (HTTP or WS)
-graphql_app: GraphQLRouter = limiter.limit("100/minute")(
-    GraphQLRouter(
-        schema,
-        context_getter=Context.get_context,  # Use the context getter
-    )
+# Create the GraphQL router instance with simplified configuration
+graphql_app = GraphQLRouter(
+    schema,
+    context_getter=Context.get_context,  # Use the context getter
+    graphql_ide="graphiql",  # Enable GraphiQL interface for easy testing
+    allow_queries_via_get=True, # Re-enable allowing GET requests
 )
 
-
-# --- Mount Routers ---
-# Remove the wrapper function and include the rate-limited router directly
-# This ensures both HTTP and WebSocket connections are handled by the router.
+# Include the GraphQL router at the /graphql prefix
 app.include_router(graphql_app, prefix="/graphql")
-# @limiter.limit("100/minute") # Removed decorator from here
-# async def graphql_endpoint(request: Request): # Removed wrapper function
-#     # This function is needed to apply the decorator to the router include
-#     # The actual handling is done by the GraphQLRouter itself
-#     # We need to await the router's handling method
-#     return await graphql_app.handle(request=request)
 
+# Add a standalone GraphQL endpoint for more compatibility
+from starlette.responses import JSONResponse
+from strawberry.http import GraphQLHTTPResponse
+import json
 
+@app.post("/graphql-standalone")
+async def graphql_standalone(request: Request):
+    try:
+        # Get the request body
+        body = await request.json()
+        query = body.get("query", "")
+        variables = body.get("variables", None)
+        operation_name = body.get("operationName", None)
+        
+        logger.debug(f"GraphQL query: {query}")
+        logger.debug(f"Variables: {variables}")
+        logger.debug(f"Operation name: {operation_name}")
+        
+        # Create a simplified context
+        context = {"request": request}
+        
+        # Execute the query
+        result = await schema.execute(
+            query,
+            variable_values=variables,
+            context_value=context,
+            operation_name=operation_name
+        )
+        
+        # Return the result
+        return JSONResponse(
+            content={"data": result.data, "errors": [str(err) for err in result.errors] if result.errors else None},
+            status_code=200 if not result.errors else 400
+        )
+    except Exception as e:
+        logger.error(f"Error processing GraphQL query: {str(e)}")
+        return JSONResponse(
+            content={"errors": [str(e)]},
+            status_code=400
+        )
+
+# Add a direct GraphQL endpoint that handles raw POST requests
+@app.post("/graphql-direct")
+async def graphql_direct(query: str = Body(..., embed=True)):
+    result = await schema.execute(
+        query,
+        context_value={"request": None}  # Simplified context
+    )
+    
+    if result.errors:
+        return JSONResponse(
+            content={"errors": [str(error) for error in result.errors]},
+            status_code=400
+        )
+    
+    return JSONResponse(content={"data": result.data})
+
+# Add a simple route that returns a GraphQL hello query result directly
+@app.get("/api/hello")
+async def graphql_hello():
+    # A simplified way to execute a GraphQL query without going through the router
+    result = await schema.execute(
+        "{ hello }",
+        context_value={"request": None}
+    )
+    return result.data
+
+# Add a dedicated GraphiQL route for easier access
+from starlette.responses import HTMLResponse
+@app.get("/graphiql", response_class=HTMLResponse)
+async def get_graphiql():
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>GraphiQL</title>
+        <link href="https://cdn.jsdelivr.net/npm/graphiql@2.0.0/graphiql.min.css" rel="stylesheet" />
+        <style>
+            body {
+                height: 100%;
+                margin: 0;
+                width: 100%;
+                overflow: hidden;
+            }
+            #graphiql {
+                height: 100vh;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="graphiql"></div>
+
+        <script src="https://cdn.jsdelivr.net/npm/react@17.0.2/umd/react.production.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/react-dom@17.0.2/umd/react-dom.production.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/graphiql@2.0.0/graphiql.min.js"></script>
+
+        <script>
+            const fetcher = graphQLParams => {
+                return fetch('http://localhost:8000/graphql-standalone', {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(graphQLParams),
+                    credentials: 'same-origin',
+                })
+                .then(response => response.json())
+                .catch(error => {
+                    console.error('Error:', error);
+                    return {
+                        data: null,
+                        errors: [{ message: 'Error connecting to GraphQL endpoint' }]
+                    };
+                });
+            };
+
+            ReactDOM.render(
+                React.createElement(GraphiQL, { fetcher: fetcher }),
+                document.getElementById('graphiql')
+            );
+        </script>
+    </body>
+    </html>
+    """
+    return html
+
+# Include the auth router
 app.include_router(auth_router)  # Prefix is already defined in the router itself
 
 
@@ -156,15 +274,14 @@ app.include_router(auth_router)  # Prefix is already defined in the router itsel
 async def read_root():
     logger.info("Root endpoint called")
     return {"message": "Welcome to Project Alatar"}
-
-
+#
+#
 @app.get("/health")
 @limiter.limit("10/minute")  # Example: Limit health checks too
 async def health_check(request: Request):  # Add request for limiter
     # Basic health check, can be expanded later (e.g., check DB connection)
     logger.debug("Health check endpoint called")
     return {"status": "ok"}
-
 
 # Add middleware or request logging if needed beyond OTel
 # @app.middleware("http")
