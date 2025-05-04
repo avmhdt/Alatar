@@ -1,27 +1,41 @@
-from app.core.config import settings
-from app.core.security import (
-    # create_access_token, # Removed - belongs elsewhere (e.g., app.auth.service)
-    get_password_hash,
-    verify_password,
-    # decode_access_token # Removed - belongs elsewhere (e.g., app.auth.service)
-)
-from app.core.redis_client import get_redis_connection
-from app.core.exceptions import (
+"""
+Core application components including configuration, security utilities,
+Redis client setup, and custom exceptions.
+"""
+
+from .config import settings
+from .exceptions import (
+    APIException,
+    AuthenticationError,
+    NotFoundError,
     PermissionDeniedError,
     ValidationError,
-    NotFoundError,
-    AuthenticationError
 )
+from .redis_client import (
+    close_redis_pool,
+    create_redis_pool,
+    get_analysis_update_channel,
+    get_redis_connection,
+    publish_analysis_update_to_redis,
+)
+from .security import get_password_hash, verify_password
 
 __all__ = [
+    # config
     "settings",
-    # "create_access_token", # Removed
-    "get_password_hash",
-    "verify_password",
-    # "decode_access_token", # Removed
-    "get_redis_connection",
+    # exceptions
+    "APIException",
+    "AuthenticationError",
+    "NotFoundError",
     "PermissionDeniedError",
     "ValidationError",
-    "NotFoundError",
-    "AuthenticationError",
+    # redis_client
+    "create_redis_pool",
+    "close_redis_pool",
+    "get_redis_connection",
+    "get_analysis_update_channel",
+    "publish_analysis_update_to_redis",
+    # security
+    "verify_password",
+    "get_password_hash",
 ] 

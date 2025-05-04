@@ -233,6 +233,9 @@ class GetShopifyProductsTool(BaseTool):
     )
     args_schema: type[BaseModel] = GetProductsInput
 
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        return super()._run(*args, **kwargs)
+
     # Implement async _arun, expect AsyncSession
     async def _arun(
         self,
@@ -277,6 +280,9 @@ class GetShopifyOrdersTool(BaseTool):
         "and 'query_filter' (to filter orders, e.g., by date or status) arguments."
     )
     args_schema: type[BaseModel] = GetOrdersInput
+
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        return super()._run(*args, **kwargs)
 
     # Implement async _arun, expect AsyncSession
     async def _arun(
@@ -343,6 +349,9 @@ class GetShopifyCustomersTool(BaseTool):
     description: str = "Asynchronously fetches customer data (name, email, order count, amount spent) from Shopify."
     args_schema: type[BaseModel] = GetProductsInput  # Reuse pagination schema
 
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        return super()._run(*args, **kwargs)
+
     async def _arun(
         self,
         db: AsyncSession,
@@ -377,6 +386,9 @@ class GetShopifyAnalyticsTool(BaseTool):
         BaseShopifyToolInput  # Expects db, user_id, shop_domain
     )
 
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        return super()._run(*args, **kwargs)
+
     async def _arun(
         self, db: AsyncSession, user_id: uuid.UUID, shop_domain: str, **kwargs: Any
     ) -> Any:
@@ -402,6 +414,9 @@ class GetShopifyAnalyticsTool(BaseTool):
 class WriteShopifyPriceRuleTool(BaseTool):
     name: str = "write_shopify_price_rule"
     description: str = "Asynchronously creates or updates a Shopify price rule. (TODO: Implement fully)"
+
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        return super()._run(*args, **kwargs)
 
     # args_schema: Type[BaseModel] = ... # Define input schema
     # Expect AsyncSession if client needs it for init/operation
@@ -429,6 +444,9 @@ class WriteShopifyPriceRuleTool(BaseTool):
 class WriteShopifyDraftOrderTool(BaseTool):
     name: str = "write_shopify_draft_order"
     description: str = "Asynchronously creates or updates a Shopify draft order. (TODO: Implement fully)"
+
+    def _run(self, *args: Any, **kwargs: Any) -> Any:
+        return super()._run(*args, **kwargs)
 
     # args_schema: Type[BaseModel] = ... # Define input schema
     async def _arun(

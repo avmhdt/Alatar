@@ -3,7 +3,7 @@ import uuid
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.auth.service import decode_access_token
+from .service import decode_access_token
 from app.database import current_user_id_cv, get_db
 from app.models.user import User
 
