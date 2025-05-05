@@ -17,6 +17,8 @@ services:
       - ./app:/app/app
       # Add .env for secrets (ensure it's in .gitignore)
       - ./.env:/.env:ro
+      # Ensure worker files are available
+      - ./worker*.py:/app/
     # env_file:
     #  - .env # Load variables from .env file
     environment:
@@ -68,6 +70,8 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
+      # Ensure worker files are available
+      - ./worker*.py:/app/
     # env_file:
     #   - .env
     environment:
@@ -118,6 +122,8 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
+      # Ensure worker files are available
+      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -164,6 +170,8 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
+      # Ensure worker files are available
+      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -210,6 +218,8 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
+      # Ensure worker files are available
+      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -256,6 +266,8 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
+      # Ensure worker files are available
+      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -302,6 +314,8 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
+      # Ensure worker files are available
+      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -348,6 +362,8 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
+      # Ensure worker files are available
+      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
