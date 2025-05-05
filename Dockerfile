@@ -1,5 +1,7 @@
+# syntax=docker/dockerfile:1
+
 # Use an official Python runtime as a parent image
-FROM python:3.12 as builder
+FROM --platform=$BUILDPLATFORM python:3.12 as builder
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -36,7 +38,7 @@ COPY --from=builder --chown=appuser:appuser /usr/local/bin /usr/local/bin
 # Copy application code
 # Ensure permissions are appropriate for the appuser
 COPY --chown=appuser:appuser ./app /app/app
-COPY --chown=appuser:appuser ./worker.py /app/worker.py
+COPY --chown=appuser:appuser ./worker*.py /app/
 COPY --chown=appuser:appuser ./migrations /app/migrations
 COPY --chown=appuser:appuser ./alembic.ini /app/alembic.ini
 

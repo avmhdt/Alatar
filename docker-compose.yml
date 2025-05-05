@@ -5,6 +5,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      x-bake:
+        platforms:
+          - linux/amd64
+          - linux/arm64
+        tags:
+          - alatar-app:latest
     ports:
       - "8000:8000"
     volumes:
@@ -14,22 +20,27 @@ services:
     # env_file:
     #  - .env # Load variables from .env file
     environment:
+      COMPOSE_DOCKER_CLI_BUILD: 1
+      DOCKER_BUILDKIT: 1
       PYTHONUNBUFFERED: 1
       LOGGING_LEVEL: INFO
-      # Required: Set these in your .env file
-      # DATABASE_URL: loaded via env_file
-      # JWT_SECRET: loaded via env_file
-      # APP_SECRET_KEY: loaded via env_file
-      # PGCRYPTO_SYM_KEY: loaded via env_file
-      # SHOPIFY_API_KEY: loaded via env_file
-      # SHOPIFY_API_SECRET: loaded via env_file
-      # SHOPIFY_APP_URL: loaded via env_file
-      # OPENROUTER_API_KEY: loaded via env_file
-      # Optional: LangSmith/OpenTelemetry - loaded via env_file or set here
+      POSTGRES_DB: alatar_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: YOUR_JWT_SECRET_HERE
+      APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
+      PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
+      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
+      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
+      OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
+      FRONTEND_URL: http://localhost:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       LANGCHAIN_TRACING_V2: "true"
-      # LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY}
-      # LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar}
-      # OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
     depends_on:
       db:
         condition: service_healthy
@@ -48,25 +59,39 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      x-bake:
+        platforms:
+          - linux/amd64
+          - linux/arm64
+        tags:
+          - alatar-worker-c1:latest
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
     # env_file:
     #   - .env
     environment:
+      COMPOSE_DOCKER_CLI_BUILD: 1
+      DOCKER_BUILDKIT: 1
       PYTHONUNBUFFERED: 1
       LOGGING_LEVEL: INFO
-      # Pass necessary env vars for DB, RabbitMQ, LLMs, LangSmith etc.
-      # Required: Set these in your .env file
-      # DATABASE_URL: loaded via env_file
-      # PGCRYPTO_SYM_KEY: loaded via env_file
-      # OPENROUTER_API_KEY: loaded via env_file
-      # RABBITMQ_URL: loaded via env_file
-      # Optional: LangSmith/OpenTelemetry
+      POSTGRES_DB: alatar_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: YOUR_JWT_SECRET_HERE
+      APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
+      PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
+      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
+      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
+      OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
+      FRONTEND_URL: http://localhost:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       LANGCHAIN_TRACING_V2: "true"
-      # LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY}
-      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-C1}
-      # OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
     depends_on:
       db:
         condition: service_healthy
@@ -84,15 +109,37 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      x-bake:
+        platforms:
+          - linux/amd64
+          - linux/arm64
+        tags:
+          - alatar-worker-data-retrieval:latest
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
     environment:
+      COMPOSE_DOCKER_CLI_BUILD: 1
+      DOCKER_BUILDKIT: 1
       PYTHONUNBUFFERED: 1
       LOGGING_LEVEL: INFO
+      POSTGRES_DB: alatar_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: YOUR_JWT_SECRET_HERE
+      APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
+      PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
+      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
+      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
+      OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
+      FRONTEND_URL: http://localhost:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       LANGCHAIN_TRACING_V2: "true"
-      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-DataRetrieval}
-      # Inherit other necessary env vars from .env (DB_URL, RABBITMQ_URL, etc.)
     depends_on:
       db:
         condition: service_healthy
@@ -108,15 +155,37 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      x-bake:
+        platforms:
+          - linux/amd64
+          - linux/arm64
+        tags:
+          - alatar-worker-quantitative-analysis:latest
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
     environment:
+      COMPOSE_DOCKER_CLI_BUILD: 1
+      DOCKER_BUILDKIT: 1
       PYTHONUNBUFFERED: 1
       LOGGING_LEVEL: INFO
+      POSTGRES_DB: alatar_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: YOUR_JWT_SECRET_HERE
+      APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
+      PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
+      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
+      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
+      OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
+      FRONTEND_URL: http://localhost:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       LANGCHAIN_TRACING_V2: "true"
-      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-QuantitativeAnalysis}
-      # Inherit other necessary env vars from .env
     depends_on:
       db:
         condition: service_healthy
@@ -132,15 +201,37 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      x-bake:
+        platforms:
+          - linux/amd64
+          - linux/arm64
+        tags:
+          - alatar-worker-qualitative-analysis:latest
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
     environment:
+      COMPOSE_DOCKER_CLI_BUILD: 1
+      DOCKER_BUILDKIT: 1
       PYTHONUNBUFFERED: 1
       LOGGING_LEVEL: INFO
+      POSTGRES_DB: alatar_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: YOUR_JWT_SECRET_HERE
+      APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
+      PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
+      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
+      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
+      OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
+      FRONTEND_URL: http://localhost:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       LANGCHAIN_TRACING_V2: "true"
-      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-QualitativeAnalysis}
-      # Inherit other necessary env vars from .env
     depends_on:
       db:
         condition: service_healthy
@@ -156,15 +247,37 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      x-bake:
+        platforms:
+          - linux/amd64
+          - linux/arm64
+        tags:
+          - alatar-worker-recommendation-generation:latest
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
     environment:
+      COMPOSE_DOCKER_CLI_BUILD: 1
+      DOCKER_BUILDKIT: 1
       PYTHONUNBUFFERED: 1
       LOGGING_LEVEL: INFO
+      POSTGRES_DB: alatar_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: YOUR_JWT_SECRET_HERE
+      APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
+      PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
+      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
+      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
+      OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
+      FRONTEND_URL: http://localhost:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       LANGCHAIN_TRACING_V2: "true"
-      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-RecommendationGeneration}
-      # Inherit other necessary env vars from .env
     depends_on:
       db:
         condition: service_healthy
@@ -180,15 +293,37 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      x-bake:
+        platforms:
+          - linux/amd64
+          - linux/arm64
+        tags:
+          - alatar-worker-comparative-analysis:latest
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
     environment:
+      COMPOSE_DOCKER_CLI_BUILD: 1
+      DOCKER_BUILDKIT: 1
       PYTHONUNBUFFERED: 1
       LOGGING_LEVEL: INFO
+      POSTGRES_DB: alatar_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: YOUR_JWT_SECRET_HERE
+      APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
+      PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
+      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
+      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
+      OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
+      FRONTEND_URL: http://localhost:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       LANGCHAIN_TRACING_V2: "true"
-      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-ComparativeAnalysis}
-      # Inherit other necessary env vars from .env
     depends_on:
       db:
         condition: service_healthy
@@ -204,15 +339,37 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      x-bake:
+        platforms:
+          - linux/amd64
+          - linux/arm64
+        tags:
+          - alatar-worker-predictive-analysis:latest
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
     environment:
+      COMPOSE_DOCKER_CLI_BUILD: 1
+      DOCKER_BUILDKIT: 1
       PYTHONUNBUFFERED: 1
       LOGGING_LEVEL: INFO
+      POSTGRES_DB: alatar_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: YOUR_JWT_SECRET_HERE
+      APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
+      PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
+      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
+      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
+      OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
+      FRONTEND_URL: http://localhost:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
       LANGCHAIN_TRACING_V2: "true"
-      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-Alatar-Worker-PredictiveAnalysis}
-      # Inherit other necessary env vars from .env
     depends_on:
       db:
         condition: service_healthy
@@ -232,9 +389,27 @@ services:
       - postgres_data:/var/lib/postgresql/data/
     # env_file: # Removed as .env cannot be created easily
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-alatar_db} # Changed default to match app/database.py
-      POSTGRES_USER: ${POSTGRES_USER:-user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      COMPOSE_DOCKER_CLI_BUILD: 1
+      DOCKER_BUILDKIT: 1
+      PYTHONUNBUFFERED: 1
+      LOGGING_LEVEL: INFO
+      POSTGRES_DB: alatar_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: YOUR_JWT_SECRET_HERE
+      APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
+      PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
+      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
+      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
+      OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
+      FRONTEND_URL: http://localhost:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      LANGCHAIN_TRACING_V2: "true"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-user} -d $${POSTGRES_DB:-alatar_db}"] # Changed default DB name
       interval: 10s
