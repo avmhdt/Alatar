@@ -22,20 +22,35 @@ current_user_id_cv: contextvars.ContextVar[uuid.UUID | None] = contextvars.Conte
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-# Prefer DATABASE_URL from environment, fallback for local development if needed
+# Async URL (for application runtime)
 SQLALCHEMY_DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql://user:password@localhost:5432/alatar_db"
+    "DATABASE_URL", "postgresql+asyncpg://user:password@localhost:5432/alatar_db" # Default includes asyncpg
 )
 
-# --- Sync Engine and Session (for FastAPI/GraphQL layer) ---
-sync_engine = create_engine(SQLALCHEMY_DATABASE_URL)
+# Sync URL (for Alembic migrations)
+SYNC_DATABASE_URL = os.getenv(
+    "SYNC_DATABASE_URL", SQLALCHEMY_DATABASE_URL.replace("+asyncpg", "") # Default: strip +asyncpg if present
+)
+
+# --- Sync Engine and Session (for Alembic) ---
+sync_engine = create_engine(SYNC_DATABASE_URL)
 SyncSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
 
-# --- Async Engine and Session (for Workers/Agents) ---
-# Ensure database URL is compatible with asyncpg (e.g., postgresql+asyncpg://...)
-ASYNC_SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace(
-    "postgresql://", "postgresql+asyncpg://"
-)
+# --- Async Engine and Session (for Application) ---
+# Ensure async URL has the right prefix
+if "+asyncpg" not in SQLALCHEMY_DATABASE_URL:
+    # Add warning or attempt to fix?
+    logger.warning(f"DATABASE_URL {SQLALCHEMY_DATABASE_URL} might be missing +asyncpg prefix for async engine.")
+    # Attempt to fix if it looks like a standard postgres URL
+    if SQLALCHEMY_DATABASE_URL.startswith("postgresql://"):
+        ASYNC_SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace(
+            "postgresql://", "postgresql+asyncpg://", 1
+        )
+    else:
+        ASYNC_SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL # Use as-is if unsure
+else:
+    ASYNC_SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL
+
 async_engine = create_async_engine(
     ASYNC_SQLALCHEMY_DATABASE_URL
 )  # Add pool_pre_ping=True?

@@ -12,7 +12,7 @@ from .service import (
     create_access_token,
     decode_access_token,
     authenticate_user,
-    create_user,
+    create_user_with_password as create_user,
     get_current_user,
     generate_shopify_auth_url,
     exchange_shopify_code_for_token,

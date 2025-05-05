@@ -17,8 +17,6 @@ services:
       - ./app:/app/app
       # Add .env for secrets (ensure it's in .gitignore)
       - ./.env:/.env:ro
-      # Ensure worker files are available
-      - ./worker*.py:/app/
     # env_file:
     #  - .env # Load variables from .env file
     environment:
@@ -34,8 +32,8 @@ services:
       JWT_SECRET: YOUR_JWT_SECRET_HERE
       APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
       PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
-      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
-      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_API_KEY: 89a6ee51ac7fae3beb24c436f99a5425
+      SHOPIFY_API_SECRET: 21a7551983cc0add72703a29aea59291
       SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
       OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
       FRONTEND_URL: http://localhost:3000
@@ -70,8 +68,6 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
-      # Ensure worker files are available
-      - ./worker*.py:/app/
     # env_file:
     #   - .env
     environment:
@@ -83,12 +79,13 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       JWT_SECRET: YOUR_JWT_SECRET_HERE
       APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
       PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
-      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
-      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_API_KEY: 89a6ee51ac7fae3beb24c436f99a5425
+      SHOPIFY_API_SECRET: 21a7551983cc0add72703a29aea59291
       SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
       OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
       FRONTEND_URL: http://localhost:3000
@@ -122,8 +119,6 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
-      # Ensure worker files are available
-      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -133,12 +128,13 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       JWT_SECRET: YOUR_JWT_SECRET_HERE
       APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
       PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
-      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
-      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_API_KEY: 89a6ee51ac7fae3beb24c436f99a5425
+      SHOPIFY_API_SECRET: 21a7551983cc0add72703a29aea59291
       SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
       OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
       FRONTEND_URL: http://localhost:3000
@@ -170,8 +166,6 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
-      # Ensure worker files are available
-      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -181,12 +175,13 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       JWT_SECRET: YOUR_JWT_SECRET_HERE
       APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
       PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
-      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
-      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_API_KEY: 89a6ee51ac7fae3beb24c436f99a5425
+      SHOPIFY_API_SECRET: 21a7551983cc0add72703a29aea59291
       SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
       OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
       FRONTEND_URL: http://localhost:3000
@@ -218,8 +213,6 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
-      # Ensure worker files are available
-      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -229,12 +222,13 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       JWT_SECRET: YOUR_JWT_SECRET_HERE
       APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
       PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
-      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
-      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_API_KEY: 89a6ee51ac7fae3beb24c436f99a5425
+      SHOPIFY_API_SECRET: 21a7551983cc0add72703a29aea59291
       SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
       OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
       FRONTEND_URL: http://localhost:3000
@@ -266,8 +260,6 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
-      # Ensure worker files are available
-      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -277,12 +269,13 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       JWT_SECRET: YOUR_JWT_SECRET_HERE
       APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
       PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
-      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
-      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_API_KEY: 89a6ee51ac7fae3beb24c436f99a5425
+      SHOPIFY_API_SECRET: 21a7551983cc0add72703a29aea59291
       SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
       OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
       FRONTEND_URL: http://localhost:3000
@@ -314,8 +307,6 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
-      # Ensure worker files are available
-      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -324,13 +315,14 @@ services:
       POSTGRES_DB: alatar_db
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       JWT_SECRET: YOUR_JWT_SECRET_HERE
       APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
       PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
-      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
-      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_API_KEY: 89a6ee51ac7fae3beb24c436f99a5425
+      SHOPIFY_API_SECRET: 21a7551983cc0add72703a29aea59291
       SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
       OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
       FRONTEND_URL: http://localhost:3000
@@ -362,8 +354,6 @@ services:
     volumes:
       - ./app:/app/app
       - ./.env:/.env:ro
-      # Ensure worker files are available
-      - ./worker*.py:/app/
     environment:
       COMPOSE_DOCKER_CLI_BUILD: 1
       DOCKER_BUILDKIT: 1
@@ -373,12 +363,13 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       JWT_SECRET: YOUR_JWT_SECRET_HERE
       APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
       PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
-      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
-      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_API_KEY: 89a6ee51ac7fae3beb24c436f99a5425
+      SHOPIFY_API_SECRET: 21a7551983cc0add72703a29aea59291
       SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
       OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
       FRONTEND_URL: http://localhost:3000
@@ -413,12 +404,13 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       JWT_SECRET: YOUR_JWT_SECRET_HERE
       APP_SECRET_KEY: YOUR_APP_SECRET_KEY_HERE
       PGCRYPTO_SYM_KEY: YOUR_PGCRYPTO_KEY_HERE # Used for database encryption
-      SHOPIFY_API_KEY: YOUR_SHOPIFY_API_KEY_HERE
-      SHOPIFY_API_SECRET: YOUR_SHOPIFY_API_SECRET_HERE
+      SHOPIFY_API_KEY: 89a6ee51ac7fae3beb24c436f99a5425
+      SHOPIFY_API_SECRET: 21a7551983cc0add72703a29aea59291
       SHOPIFY_APP_URL: YOUR_SHOPIFY_APP_URL_HERE
       OPENROUTER_API_KEY: ece34997b0f1f265c22350b2bf3d0127ac2aeeacbac84cc0fbfb7e3c4527b804
       FRONTEND_URL: http://localhost:3000

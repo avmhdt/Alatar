@@ -9,17 +9,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 # Attempt to import and configure OpenTelemetry auto-instrumentation
-try:
-    import opentelemetry.instrumentation.auto_instrumentation.sitecustomize
-
-    # You might need to configure exporters, etc., via environment variables
-    # e.g., OTEL_TRACES_EXPORTER=otlp_http, OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-    opentelemetry.instrumentation.auto_instrumentation.sitecustomize.bootstrap()
-    logging.info("OpenTelemetry auto-instrumentation bootstrapped successfully.")
-except ImportError:
-    logging.warning("OpenTelemetry auto-instrumentation not found. Skipping.")
-except Exception as otel_err:
-    logging.error(f"Error bootstrapping OpenTelemetry: {otel_err}", exc_info=True)
+# try:
+#     import opentelemetry.instrumentation.auto_instrumentation.sitecustomize
+#
+#     # You might need to configure exporters, etc., via environment variables
+#     # e.g., OTEL_TRACES_EXPORTER=otlp_http, OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+#     opentelemetry.instrumentation.auto_instrumentation.sitecustomize.bootstrap()
+#     logging.info("OpenTelemetry auto-instrumentation bootstrapped successfully.")
+# except ImportError:
+#     logging.warning("OpenTelemetry auto-instrumentation not found. Skipping.")
+# except Exception as otel_err:
+#     logging.error(f"Error bootstrapping OpenTelemetry: {otel_err}", exc_info=True)
 
 from aio_pika.abc import AbstractIncomingMessage
 from langgraph.graph import StateGraph  # Import base StateGraph

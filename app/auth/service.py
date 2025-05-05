@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 # Import CRUD module instead of individual functions
 from app import crud
 from app.schemas.user import UserCreate
+from app.crud.user import get_user_by_shopify_id # Import the new CRUD function
 
 # Updated imports to use core modules
 from app.core.config import settings
@@ -78,31 +79,28 @@ def decode_access_token(token: str) -> str | None:  # Return user_id (subject) o
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User | None:
-    user = crud.user.get_user_by_email(db, email=email)  # Use CRUD function from module
+    user = crud.user.get_user_by_email(db, email=email) # Use CRUD function from module
     if not user:
         return None
-    # Use imported security function
+    # Add check for password existence before verifying
+    if not user.hashed_password:
+        return None # Cannot authenticate with password if none is set
     if not security_verify_password(password, user.hashed_password):
         return None
     return user
 
 
-def create_user(db: Session, user_data: UserCreate) -> User:
-    # Use imported security function
-    hashed_password = security_get_password_hash(user_data.password)
-    # Ensure email is stored lowercase for case-insensitive lookup
-    db_user = User(email=user_data.email.lower(), hashed_password=hashed_password)
-    # Call the thin CRUD function to add the user
-    crud.user.add_user(db=db, user_obj=db_user) # No return needed, object is mutated
-    try:
-        db.commit()
-        db.refresh(db_user) # Refresh after commit
-        return db_user
-    except Exception as e:
-        db.rollback()
-        # Log the error
-        logger.error(f"Error creating user: {e}") # TODO: Replace with logger
-        raise
+# Modify create_user call if needed, or rely on CRUD version directly
+# We primarily use the CRUD version now from the router
+async def create_user_with_password(db: Session, user_data: UserCreate) -> User:
+    """Specific function to create a user with a password (standard registration)."""
+    # Check if email exists
+    existing_user = await crud.user.get_user_by_email(db, email=user_data.email)
+    if existing_user:
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    # Use the updated CRUD function
+    return await crud.user.create_user(db=db, obj_in=user_data)
 
 
 # --- FastAPI Dependency for getting current user (using CRUD) ---
@@ -171,22 +169,17 @@ def generate_shopify_auth_url(shop_domain: str) -> tuple[str, str]:
 
 
 def exchange_shopify_code_for_token(shop_domain: str, code: str) -> dict:
-    """Exchanges the authorization code for a Shopify access token.
-
-    Args:
-    ----
-        shop_domain: The myshopify.com domain of the shop.
-        code: The authorization code received from Shopify.
-
+    """Exchanges the authorization code for a Shopify access token 
+       and associated user information.
+    
     Returns:
     -------
-        A dictionary containing the access token details (e.g., {'access_token': '...', 'scope': '...'}).
-
-    Raises:
-    ------
-        ValueError: If configuration is missing or Shopify API returns an error.
-        requests.exceptions.RequestException: If the HTTP request fails.
-
+        A dictionary containing the access token details and associated user info.
+        Example: {
+            'access_token': '...', 
+            'scope': '...', 
+            'associated_user': {'id': 123, 'email': '...'}
+        }
     """
     if not settings.SHOPIFY_API_KEY or not settings.SHOPIFY_API_SECRET:
         raise ValueError("Shopify API Key and Secret must be configured.")
@@ -202,37 +195,33 @@ def exchange_shopify_code_for_token(shop_domain: str, code: str) -> dict:
         response = requests.post(token_url, json=payload)
         response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
         token_data = response.json()
-        if "access_token" not in token_data:
-            # Shopify might return errors differently, check response content
+        # Check for essential data
+        if "access_token" not in token_data or "associated_user" not in token_data:
+            error_detail = token_data.get('error', 'Unknown error')
+            logger.error(f"Failed to retrieve access token or associated_user from Shopify: {error_detail} - Response: {token_data}")
             raise ValueError(
-                f"Failed to retrieve access token: {token_data.get('error', 'Unknown error')}"
+                f"Failed to retrieve required details from Shopify: {error_detail}"
             )
-        return token_data  # Contains access_token, scope, possibly expires_in, associated_user_scope, associated_user
+        # Log extracted user info for debugging
+        shopify_user_info = token_data.get("associated_user", {})
+        logger.info(f"Received Shopify user info: ID={shopify_user_info.get('id')}, Email={shopify_user_info.get('email')}")
+        return token_data  # Contains access_token, scope, associated_user, etc.
     except requests.exceptions.RequestException as e:
         # Log the error details
-        logger.error(f"Error exchanging Shopify code: {e}") # TODO: Replace with logger
+        logger.error(f"Error exchanging Shopify code: {e}")
         raise  # Re-raise the exception for the caller to handle
+    except Exception as e:
+        logger.error(f"Unexpected error during Shopify token exchange: {e}")
+        raise
 
 
-def store_shopify_credentials(
+async def store_shopify_credentials(
     db: Session, user_id: uuid.UUID, shop_domain: str, access_token: str, scopes: str
 ) -> LinkedAccount:
     """Encrypts and stores Shopify credentials using pgcrypto via the CRUD layer.
 
     Handles creating or updating the account and manages the transaction.
-
-    Args:
-    ----
-        db: SQLAlchemy Session.
-        user_id: UUID of the user.
-        shop_domain: The myshopify.com domain.
-        access_token: The Shopify access token (plaintext).
-        scopes: Comma-separated string of granted scopes.
-
-    Returns:
-    -------
-        The created or updated LinkedAccount object.
-
+    (This function remains largely unchanged as it focuses on the LinkedAccount)
     """
     # Encrypt using pgcrypto function within the query
     # NOTE: This still sends the *key* to the DB with the query, but not the plaintext token.
@@ -242,7 +231,7 @@ def store_shopify_credentials(
     ).scalar_one()
 
     # Call the thin CRUD function to save the encrypted data
-    db_account = crud.linked_account.save_shopify_account(
+    db_account = await crud.linked_account.save_shopify_account(
         db=db,
         user_id=user_id,
         shop_domain=shop_domain,
@@ -251,14 +240,13 @@ def store_shopify_credentials(
     )
 
     try:
-        db.commit()
-        db.refresh(db_account)
+        await db.commit()
+        await db.refresh(db_account)
         return db_account
     except Exception as e:
-        db.rollback()
-        # Log the error
-        logger.error(f"Error storing Shopify credentials: {e}") # TODO: Replace with logger
-        raise  # Re-raise or handle appropriately
+        await db.rollback()
+        logger.error(f"Error storing Shopify credentials: {e}") 
+        raise 
 
 
 # REMOVED: Redundant get_decrypted_shopify_credentials function.

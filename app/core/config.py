@@ -2,7 +2,7 @@ import os
 
 from dotenv import load_dotenv
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Load .env file if it exists
 load_dotenv()
@@ -98,14 +98,11 @@ class Settings(BaseSettings):
     REDIS_PORT: int = Field(..., env="REDIS_PORT")
     REDIS_DB: int = Field(..., env="REDIS_DB")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        # Allow reading scopes as comma-separated string from env var
-        fields = {
-            "SHOPIFY_SCOPES": {"env_separator": ","},
-            "CORS_ALLOWED_ORIGINS": {"env_separator": ","},
-        }
+    model_config = SettingsConfigDict(
+        extra='ignore', 
+        env_file=".env", 
+        env_file_encoding="utf-8"
+    ) # Ignore extra fields and load .env
 
 
 settings = Settings()

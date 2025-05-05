@@ -7,13 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import schemas
-from app.schemas.user import User
+from app import schemas, crud
+from app.schemas.user import User, UserCreate
 from app.auth import service as auth_service
-from app.auth.dependencies import get_current_user_required as get_current_user
 from app.core.config import settings
-from app.database import get_db
+from app.database import get_async_db
 
 import logging
 
@@ -50,13 +50,13 @@ def verify_shopify_hmac(query_params: dict, secret: str) -> bool:
     return hmac.compare_digest(digest, hmac_signature)
 
 
-# --- Standard OAuth2 Token Endpoint (Moved under /auth prefix) ---
+# --- Standard OAuth2 Token Endpoint (Email/Password Login) ---
 @router.post("/token", response_model=schemas.Token)
-def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
+async def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(), 
+    db: AsyncSession = Depends(get_async_db)
 ):
-    # Use email from form_data.username for authentication
-    user = auth_service.authenticate_user(
+    user = await auth_service.authenticate_user(
         db, email=form_data.username.lower(), password=form_data.password
     )
     if not user:
@@ -65,9 +65,7 @@ def login_for_access_token(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    # Store user ID (as string) in the token's 'sub' claim
     access_token = auth_service.create_access_token(
-        # Use settings for expiry
         data={"sub": str(user.id)},
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     )
@@ -78,14 +76,13 @@ def login_for_access_token(
 
 
 @router.get("/shopify/start")
-def start_shopify_oauth(
+async def start_shopify_oauth(
     request: Request,
     shop: str = Query(
         ...,
         description="The user's myshopify.com domain (e.g., your-store.myshopify.com)",
     ),
-    # Require user to be logged in to start the flow
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(auth_service.get_current_user),
 ):
     """Initiates the Shopify OAuth flow by redirecting the user to Shopify."""
     if not shop.endswith(".myshopify.com"):
@@ -95,119 +92,121 @@ def start_shopify_oauth(
 
     try:
         auth_url, state = auth_service.generate_shopify_auth_url(shop_domain=shop)
-        # Store the state in the session for later verification
         request.session["shopify_oauth_state"] = state
-        # Optionally store the shop domain if needed on callback and not provided by Shopify (it usually is)
-        # request.session['shopify_shop_domain'] = shop
         logger.info(
             f"Redirecting user {current_user.id} to Shopify for shop {shop}"
-        )  # Add logging
+        )
         return RedirectResponse(url=auth_url)
     except ValueError as e:
-        # Handle configuration errors (missing keys etc.)
         raise HTTPException(status_code=500, detail=f"Server configuration error: {e}")
     except Exception as e:
-        # Generic error handler
         raise HTTPException(
             status_code=500, detail=f"An unexpected error occurred: {e}"
         )
 
 
 @router.get("/shopify/callback")
-def handle_shopify_callback(
+async def handle_shopify_callback(
     request: Request,
-    db: Session = Depends(get_db),
-    # Parameters from Shopify
+    db: AsyncSession = Depends(get_async_db),
     code: str = Query(...),
     hmac: str = Query(...),
     shop: str = Query(...),
     state: str = Query(...),
     timestamp: str = Query(...),
-    # Optionally require user to be logged in, although state verification ties it somewhat.
-    # If state doesn't include user info, we NEED the user to be logged in here.
-    current_user: User = Depends(get_current_user),
 ):
-    """Handles the callback from Shopify after user authorization."""
-    # 1. Verify HMAC first!
-    # Convert Starlette QueryParams to a simple dict for verification func
+    """Handles the callback from Shopify after user authorization during app install.
+       Finds or creates a user based on Shopify info, links the account,
+       and redirects the user to the frontend with a session token.
+    """
+    logger.info(f"Received Shopify callback for shop {shop}")
     query_param_dict = dict(request.query_params)
     if not settings.SHOPIFY_API_SECRET or not verify_shopify_hmac(
         query_param_dict, settings.SHOPIFY_API_SECRET
     ):
-        logger.error(f"HMAC verification failed for shop {shop}")  # Add logging
+        logger.error(f"HMAC verification failed for shop {shop}")
         raise HTTPException(status_code=403, detail="Invalid HMAC signature")
+    logger.debug(f"HMAC verified for shop {shop}")
 
-    # 2. Verify state (CSRF protection)
-    stored_state = request.session.get("shopify_oauth_state")
-    if not stored_state or not hmac.compare_digest(stored_state, state):
-        logger.error(
-            f"State verification failed for shop {shop}. Stored: {stored_state}, Received: {state}"
-        )  # Add logging
-        raise HTTPException(status_code=403, detail="Invalid state parameter")
+    logger.debug(f"State parameter received: {state} (Verification skipped for install flow)")
 
-    # Clear the state from session now that it's verified
-    request.session.pop("shopify_oauth_state", None)
-
+    user: User | None = None
     try:
-        # 3. Exchange code for token
+        logger.debug(f"Exchanging Shopify code for shop {shop}")
         token_data = auth_service.exchange_shopify_code_for_token(
             shop_domain=shop, code=code
         )
         access_token = token_data.get("access_token")
-        scopes = token_data.get("scope")  # Use the scopes granted by Shopify
-        # associated_user = token_data.get('associated_user') # Info about the user who authorized
+        scopes = token_data.get("scope")
+        associated_user_data = token_data.get("associated_user")
 
-        if not access_token or not scopes:
-            logger.error(
-                f"Failed to get token or scope from Shopify for shop {shop}"
-            )  # Add logging
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to retrieve access token details from Shopify",
+        if not access_token or not scopes or not associated_user_data:
+            logger.error(f"Missing access_token, scopes, or associated_user in Shopify response for shop {shop}")
+            raise HTTPException(status_code=502, detail="Failed to get required details from Shopify")
+
+        shopify_user_id = str(associated_user_data.get("id"))
+        shopify_email = associated_user_data.get("email")
+        
+        if not shopify_user_id or not shopify_email:
+             logger.error(f"Missing user ID or email in associated_user data from Shopify for shop {shop}")
+             raise HTTPException(status_code=502, detail="Missing user details from Shopify")
+
+        logger.info(f"Successfully exchanged code. Shopify User ID: {shopify_user_id}, Email: {shopify_email}")
+
+        user = await crud.user.get_user_by_shopify_id(db, shopify_user_id=shopify_user_id)
+
+        if user:
+            logger.info(f"Found existing user (ID: {user.id}) for Shopify user ID {shopify_user_id}")
+        else:
+            logger.info(f"No existing user found for Shopify user ID {shopify_user_id}. Creating new user.")
+            existing_email_user = await crud.user.get_user_by_email(db, email=shopify_email)
+            if existing_email_user:
+                 logger.error(f"Shopify email {shopify_email} already exists for a different user (ID: {existing_email_user.id}). Cannot link automatically.")
+                 raise HTTPException(status_code=409, detail=f"Email {shopify_email} associated with this Shopify account already exists in our system. Please log in with your existing account and link Shopify manually, or contact support.")
+            
+            user_in = UserCreate(email=shopify_email, password=None)
+            user = await crud.user.create_user(
+                db=db, obj_in=user_in, shopify_user_id=shopify_user_id
             )
+            logger.info(f"Created new user (ID: {user.id}) for Shopify user ID {shopify_user_id}")
 
-        # 4. Store credentials, linking to the currently logged-in user
-        logger.info(
-            f"Storing credentials for user {current_user.id}, shop {shop}"
-        )  # Add logging
-        auth_service.store_shopify_credentials(
+        logger.info(f"Storing Shopify credentials for user {user.id} and shop {shop}")
+        await auth_service.store_shopify_credentials(
             db=db,
-            user_id=current_user.id,
+            user_id=user.id,
             shop_domain=shop,
             access_token=access_token,
             scopes=scopes,
         )
 
-        # 5. Redirect user to a success page in the frontend
-        # Use the dedicated FRONTEND_URL setting
-        frontend_success_url = f"{settings.FRONTEND_URL.strip('/')}/settings/connections?success=shopify"
-        logger.info(
-            f"Successfully linked Shopify account for user {current_user.id}, shop {shop}"
-        )  # Add logging
-        return RedirectResponse(url=frontend_success_url)
+        logger.info(f"Creating JWT token for user {user.id}")
+        app_token = auth_service.create_access_token(
+            data={"sub": str(user.id)},
+            expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        )
 
+        frontend_url = f"{settings.FRONTEND_URL.strip('/')}/auth/callback#token={app_token}"
+        
+        logger.info(f"Redirecting user {user.id} to frontend: {frontend_url.split('#')[0]}...")
+        return RedirectResponse(url=frontend_url)
+
+    except HTTPException as e:
+        logger.error(f"HTTPException during Shopify callback for shop {shop}: {e.detail} (Status: {e.status_code})")
+        raise e 
     except ValueError as e:
-        # Handle errors from service functions (e.g., config issues, token exchange failure)
-        logger.error(f"Error during Shopify callback for shop {shop}: {e}")  # Add logging
+        logger.error(f"ValueError during Shopify callback for shop {shop}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except requests.exceptions.RequestException as e:
-        logger.error(
-            f"HTTP Request error during Shopify callback for shop {shop}: {e}"
-        )  # Add logging
-        raise HTTPException(
-            status_code=502, detail="Failed to communicate with Shopify"
-        )
+        logger.error(f"HTTP Request error during Shopify callback for shop {shop}: {e}")
+        raise HTTPException(status_code=502, detail="Failed to communicate with Shopify")
     except Exception as e:
-        logger.error(
-            f"Unexpected error during Shopify callback for shop {shop}: {e}"
-        )  # Add logging
-        # Generic error handler
-        raise HTTPException(
-            status_code=500, detail=f"An unexpected server error occurred: {e}"
-        )
+        user_id_info = f"user {user.id}" if user else "unknown user"
+        logger.exception(f"Unexpected error during Shopify callback for {user_id_info}, shop {shop}: {e}")
+        raise HTTPException(status_code=500, detail="An unexpected server error occurred during Shopify authentication.")
 
 
 # Example route to test authentication (optional - now uses User model)
 # @router.get("/users/me", response_model=User)
 # async def read_users_me(current_user: User = Depends(auth_service.get_current_user)):
 #     return current_user
+
