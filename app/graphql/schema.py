@@ -102,6 +102,12 @@ from .types.user_error import UserError  # Updated import
 import logging
 logger = logging.getLogger(__name__)
 
+# Add imports for LLM interaction
+from langchain_core.output_parsers import StrOutputParser
+
+# Import aget_llm_client
+from app.agents.utils import aget_llm_client
+
 
 # --- Custom Context ---
 # Useful for passing request-scoped objects like DB session
@@ -198,8 +204,33 @@ class Query:
     # Placeholder for root query fields
     # Inherit from imported base RootQuery if using that pattern
     @strawberry.field
-    def hello(self) -> str:
-        return "World"
+    async def hello(self, info: StrawberryInfo) -> str:
+        # Get DB session and user ID from context
+        db: AsyncSession = info.context.db
+        user_id: uuid.UUID | None = getattr(info.context, 'user_id', None) # Assuming user_id is set in context
+
+        if not user_id:
+             # Handle case where user is not authenticated, if necessary
+             # For now, just use a default or raise an error
+             # Here we'll just use a generic LLM call without user context
+             llm = await aget_llm_client(db=db, user_id=None, model_type="generic") # Use a suitable default model_type
+        else:
+            # Get user-specific LLM client if needed, or use default
+            llm = await aget_llm_client(db=db, user_id=user_id, model_type="generic") # Adjust model_type as needed
+
+        # Define a simple prompt
+        prompt = "Say hello in a friendly way."
+
+        # Create a simple chain: LLM -> String Output Parser
+        chain = llm | StrOutputParser()
+
+        # Invoke the chain
+        try:
+            response = await chain.ainvoke(prompt)
+            return response
+        except Exception as e:
+            logger.error(f"Error calling LLM for hello query: {e}")
+            return "Error interacting with LLM." # Return an error message
 
     # Add me query
     @strawberry.field

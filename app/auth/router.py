@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas, crud
 from app.schemas.user import User, UserCreate
-from app.auth import service as auth_service
+from app.auth import service as auth_service, get_current_user_optional
 from app.core.config import settings
 from app.database import get_async_db
 
@@ -82,7 +82,11 @@ async def start_shopify_oauth(
         ...,
         description="The user's myshopify.com domain (e.g., your-store.myshopify.com)",
     ),
-    current_user: User = Depends(auth_service.get_current_user),
+    client_redirect_uri: str | None = Query(
+        None, 
+        description="Optional URI to redirect the client back to after Alatar\'s auth flow."
+    ),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """Initiates the Shopify OAuth flow by redirecting the user to Shopify."""
     if not shop.endswith(".myshopify.com"):
@@ -93,9 +97,18 @@ async def start_shopify_oauth(
     try:
         auth_url, state = auth_service.generate_shopify_auth_url(shop_domain=shop)
         request.session["shopify_oauth_state"] = state
-        logger.info(
-            f"Redirecting user {current_user.id} to Shopify for shop {shop}"
-        )
+        if client_redirect_uri:
+            request.session["client_redirect_uri"] = client_redirect_uri
+            logger.info(f"Storing client_redirect_uri for this session: {client_redirect_uri}")
+
+        if current_user:
+            logger.info(
+                f"Redirecting user {current_user.id} to Shopify for shop {shop}"
+            )
+        else:
+            logger.info(
+                f"Redirecting new/unidentified user to Shopify for shop {shop}"
+            )
         return RedirectResponse(url=auth_url)
     except ValueError as e:
         raise HTTPException(status_code=500, detail=f"Server configuration error: {e}")
@@ -118,6 +131,7 @@ async def handle_shopify_callback(
     """Handles the callback from Shopify after user authorization during app install.
        Finds or creates a user based on Shopify info, links the account,
        and redirects the user to the frontend with a session token.
+       If client_redirect_uri was provided in the start phase, redirects there.
     """
     logger.info(f"Received Shopify callback for shop {shop}")
     query_param_dict = dict(request.query_params)
@@ -127,6 +141,16 @@ async def handle_shopify_callback(
         logger.error(f"HMAC verification failed for shop {shop}")
         raise HTTPException(status_code=403, detail="Invalid HMAC signature")
     logger.debug(f"HMAC verified for shop {shop}")
+
+    # Retrieve the client_redirect_uri from session if it was set
+    client_redirect_uri = request.session.pop("client_redirect_uri", None)
+    if client_redirect_uri:
+        logger.info(f"Retrieved client_redirect_uri from session: {client_redirect_uri}")
+        # TODO: IMPORTANT SECURITY VALIDATION:
+        # Validate client_redirect_uri against an allowlist from settings
+        # e.g., if client_redirect_uri not in settings.ALLOWED_CLIENT_REDIRECT_URIS:
+        # raise HTTPException(status_code=400, detail="Invalid client_redirect_uri")
+        pass # Placeholder for validation
 
     logger.debug(f"State parameter received: {state} (Verification skipped for install flow)")
 
@@ -185,10 +209,17 @@ async def handle_shopify_callback(
             expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         )
 
-        frontend_url = f"{settings.FRONTEND_URL.strip('/')}/auth/callback#token={app_token}"
+        final_redirect_url: str
+        if client_redirect_uri:
+            # Ensure client_redirect_uri does not have existing fragment
+            base_client_redirect_uri = client_redirect_uri.split('#')[0]
+            final_redirect_url = f"{base_client_redirect_uri}#token={app_token}"
+            logger.info(f"Redirecting user {user.id} to client_redirect_uri: {final_redirect_url.split('#')[0]}...")
+        else:
+            final_redirect_url = f"{settings.FRONTEND_URL.strip('/')}/auth/callback#token={app_token}"
+            logger.info(f"Redirecting user {user.id} to Alatar frontend: {final_redirect_url.split('#')[0]}...")
         
-        logger.info(f"Redirecting user {user.id} to frontend: {frontend_url.split('#')[0]}...")
-        return RedirectResponse(url=frontend_url)
+        return RedirectResponse(url=final_redirect_url)
 
     except HTTPException as e:
         logger.error(f"HTTPException during Shopify callback for shop {shop}: {e.detail} (Status: {e.status_code})")
